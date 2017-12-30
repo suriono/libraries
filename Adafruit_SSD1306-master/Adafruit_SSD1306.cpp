@@ -732,4 +732,8 @@ void Adafruit_SSD1306::drawFastVLineInternal(int16_t x, int16_t __y, int16_t __h
 void Adafruit_SSD1306::Uz_Clear_FirstRow() {
    memset(buffer, 0, (SSD1306_LCDWIDTH*SSD1306_LCDHEIGHT/8 / 4));
 }
+void Adafruit_SSD1306::Uz_Clear_Last3Rows() {
+   memset(buffer, SSD1306_LCDWIDTH*SSD1306_LCDHEIGHT/8 / 4 + 1, SSD1306_LCDWIDTH*SSD1306_LCDHEIGHT/8 - 1);
+}
+
 

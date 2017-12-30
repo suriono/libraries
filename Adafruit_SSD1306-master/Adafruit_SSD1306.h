@@ -170,6 +170,7 @@ class Adafruit_SSD1306 : public Adafruit_GFX {
 
   // ======= UZ ============
   void Uz_Clear_FirstRow();
+  void Uz_Clear_Last3Rows();
 
  private:
   int8_t _i2caddr, _vccstate, sid, sclk, dc, rst, cs;
