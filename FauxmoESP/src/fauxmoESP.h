@@ -1,6 +1,6 @@
 /*
 
-FAUXMO ESP 2.0.0
+FAUXMO ESP 2.2.0
 
 Copyright (C) 2016 by Xose Pérez <xose dot perez at gmail dot com>
 
@@ -26,8 +26,7 @@ THE SOFTWARE.
 
 */
 
-#ifndef FAUXMOESP_h
-#define FAUXMOESP_h
+#pragma once
 
 #define DEFAULT_TCP_BASE_PORT   52000
 #define UDP_MULTICAST_IP        IPAddress(239,255,255,250)
@@ -35,44 +34,13 @@ THE SOFTWARE.
 #define TCP_MAX_CLIENTS         10
 
 #define UDP_SEARCH_PATTERN      "M-SEARCH"
-#define UDP_DEVICE_PATTERN      "urn:Belkin:device:**"
+#define UDP_DEVICE_PATTERN_1    "urn:Belkin:device:**"
+#define UDP_DEVICE_PATTERN_2    "urn:Belkin:device:controllee:1"
+#define UDP_DEVICE_PATTERN_3    "urn:Belkin:service:basicevent:1"
+#define UDP_ROOT_DEVICE         "upnp:rootdevice"
 
-#define UDP_RESPONSES_INTERVAL  100
+#define UDP_RESPONSES_INTERVAL  250
 #define UDP_RESPONSES_TRIES     5
-
-const char UDP_TEMPLATE[] PROGMEM =
-    "HTTP/1.1 200 OK\r\n"
-    "CACHE-CONTROL: max-age=86400\r\n"
-    "DATE: Sun, 20 Nov 2016 00:00:00 GMT\r\n"
-    "EXT:\r\n"
-    "LOCATION: http://%s:%d/setup.xml\r\n"
-    "OPT: \"http://schemas.upnp.org/upnp/1/0/\"; ns=01\r\n"
-    "01-NLS: %s\r\n"
-    "SERVER: Unspecified, UPnP/1.0, Unspecified\r\n"
-    "ST: urn:Belkin:device:**\r\n"
-    "USN: uuid:Socket-1_0-%s::urn:Belkin:device:**\r\n\r\n";
-
-const char SETUP_TEMPLATE[] PROGMEM =
-    "<?xml version=\"1.0\"?>"
-    "<root><device>"
-        "<deviceType>urn:Belkin:device:controllee:1</deviceType>"
-        "<friendlyName>%s</friendlyName>"
-        "<manufacturer>Belkin International Inc.</manufacturer>"
-        "<modelName>FauxmoESP</modelName>"
-        "<modelNumber>2.0.0</modelNumber>"
-        "<UDN>uuid:Socket-1_0-%s</UDN>"
-    "</device></root>";
-
-const char HEADERS[] PROGMEM =
-    "HTTP/1.1 200 OK\r\n"
-    "CONTENT-LENGTH: %d\r\n"
-    "CONTENT-TYPE: text/xml\r\n"
-    "DATE: Sun, 01 Jan 2017 00:00:00 GMT\r\n"
-    "LAST-MODIFIED: Sat, 01 Jan 2017 00:00:00 GMT\r\n"
-    "SERVER: Unspecified, UPnP/1.0, Unspecified\r\n"
-    "X-USER-AGENT: redsonic\r\n"
-    "CONNECTION: close\r\n\r\n"
-    "%s\r\n";
 
 #ifdef DEBUG_FAUXMO
     #define DEBUG_MSG_FAUXMO(...) DEBUG_FAUXMO.printf( __VA_ARGS__ )
@@ -81,17 +49,21 @@ const char HEADERS[] PROGMEM =
 #endif
 
 #include <Arduino.h>
+#include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
 #include <WiFiUdp.h>
 #include <functional>
 #include <vector>
+#include <WeMo.h>
 
-typedef std::function<void(unsigned char, const char *, bool)> TStateFunction;
+typedef std::function<void(unsigned char, const char *, bool)> TSetStateCallback;
+typedef std::function<bool(unsigned char, const char *)> TGetStateCallback;
 
 typedef struct {
     char * name;
     char * uuid;
     bool hit;
+    bool state;
     AsyncServer * server;
 } fauxmoesp_device_t;
 
@@ -100,34 +72,47 @@ class fauxmoESP {
     public:
 
         fauxmoESP(unsigned int port = DEFAULT_TCP_BASE_PORT);
-        void addDevice(const char * device_name);
-        void onMessage(TStateFunction fn) { _callback = fn; }
-        void enable(bool enable) { _enabled = enable; }
+
+        unsigned char addDevice(const char * device_name);
+        bool renameDevice(unsigned char id, const char * device_name);
+        char * getDeviceName(unsigned char id, char * buffer, size_t len);
+        void onSetState(TSetStateCallback fn) { _setCallback = fn; }
+        void onGetState(TGetStateCallback fn) { _getCallback = fn; }
+        void enable(bool enable);
         void handle();
+
+        // backwards compatibility DEPRECATED
+        void onMessage(TSetStateCallback fn) { onSetState(fn); }
+        void setState(unsigned char id, bool state);
 
     private:
 
         bool _enabled = true;
         unsigned int _base_port = DEFAULT_TCP_BASE_PORT;
         std::vector<fauxmoesp_device_t> _devices;
+        WiFiEventHandler _handler;
         WiFiUDP _udp;
-        AsyncClient * _clients[TCP_MAX_CLIENTS];
-        TStateFunction _callback = NULL;
+        AsyncClient * _tcpClients[TCP_MAX_CLIENTS];
+        TSetStateCallback _setCallback = NULL;
+        TGetStateCallback _getCallback = NULL;
 
         unsigned int _roundsLeft = 0;
         unsigned int _current = 0;
         unsigned long _lastTick;
         IPAddress _remoteIP;
         unsigned int _remotePort;
+        unsigned int _udpPattern;
 
         void _sendUDPResponse(unsigned int device_id);
         void _nextUDPResponse();
-        void _handleUDPPacket(const IPAddress remoteIP, unsigned int remotePort, uint8_t *data, size_t len);
 
-        void _sendTCPPacket(AsyncClient *client, const char * response);
-        AcConnectHandler _getTCPClientHandler(unsigned int device_id);
-        void _handleTCPPacket(unsigned int device_id, AsyncClient *client, void *data, size_t len);
+        void _handleSetup(AsyncClient *client, unsigned int device_id, void *data, size_t len);
+        void _handleMetaInfoService(AsyncClient *client, unsigned int device_id, void *data, size_t len);
+        void _handleEventService(AsyncClient *client, unsigned int device_id, void *data, size_t len);
+        void _handleControl(AsyncClient *client, unsigned int device_id, void *data, size_t len);
+
+        void _onUDPData(const IPAddress remoteIP, unsigned int remotePort, void *data, size_t len);
+        void _onTCPData(AsyncClient *client, unsigned int device_id, void *data, size_t len);
+        void _onTCPClient(AsyncClient *client, unsigned int device_id);
 
 };
-
-#endif
