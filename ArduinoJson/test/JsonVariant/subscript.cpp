@@ -6,24 +6,26 @@
 #include <catch.hpp>
 
 TEST_CASE("JsonVariant::operator[]") {
+  DynamicJsonDocument doc;
+  JsonVariant var = doc.to<JsonVariant>();
+
   SECTION("The JsonVariant is undefined") {
-    JsonVariant var = JsonVariant();
     REQUIRE(0 == var.size());
     REQUIRE(var["0"].isNull());
     REQUIRE(var[0].isNull());
   }
 
   SECTION("The JsonVariant is a string") {
-    JsonVariant var = "hello world";
+    var.set("hello world");
     REQUIRE(0 == var.size());
     REQUIRE(var["0"].isNull());
     REQUIRE(var[0].isNull());
   }
 
   SECTION("The JsonVariant is a JsonArray") {
-    DynamicJsonDocument doc;
-    JsonArray array = doc.to<JsonArray>();
-    JsonVariant var = array;
+    DynamicJsonDocument doc2;
+    JsonArray array = doc2.to<JsonArray>();
+    var.set(array);
 
     SECTION("get value") {
       array.add("element at index 0");
@@ -60,9 +62,9 @@ TEST_CASE("JsonVariant::operator[]") {
   }
 
   SECTION("The JsonVariant is a JsonObject") {
-    DynamicJsonDocument doc;
-    JsonObject object = doc.to<JsonObject>();
-    JsonVariant var = object;
+    DynamicJsonDocument doc2;
+    JsonObject object = doc2.to<JsonObject>();
+    var.set(object);
 
     SECTION("get value") {
       object["a"] = "element at key \"a\"";
@@ -91,4 +93,29 @@ TEST_CASE("JsonVariant::operator[]") {
       REQUIRE(std::string("world") == var["hello"]);
     }
   }
+
+#if defined(HAS_VARIABLE_LENGTH_ARRAY) && \
+    !defined(SUBSCRIPT_CONFLICTS_WITH_BUILTIN_OPERATOR)
+  SECTION("key is a VLA") {
+    int i = 16;
+    char vla[i];
+    strcpy(vla, "hello");
+
+    deserializeJson(doc, "{\"hello\":\"world\"}");
+    JsonVariant variant = doc.as<JsonVariant>();
+
+    REQUIRE(std::string("world") == variant[vla]);
+  }
+
+  SECTION("key is a VLA, const JsonVariant") {
+    int i = 16;
+    char vla[i];
+    strcpy(vla, "hello");
+
+    deserializeJson(doc, "{\"hello\":\"world\"}");
+    const JsonVariant variant = doc.as<JsonVariant>();
+
+    REQUIRE(std::string("world") == variant[vla]);
+  }
+#endif
 }

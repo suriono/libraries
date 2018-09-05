@@ -1,23 +1,74 @@
 ArduinoJson: change log
 =======================
 
-v6.2.3-beta
+v6.3.0-beta (2018-08-31)
+-----------
+
+* Implemented reference semantics for `JsonVariant`
+* Replace `JsonPair`'s `key` and `value` with `key()` and `value()`
+* Fixed `serializeJson(obj[key], dst)` (issue #794)
+
+> ### BREAKING CHANGES
+>
+> #### JsonVariant
+> 
+> `JsonVariant` now has a semantic similar to `JsonObject` and `JsonArray`.
+> It's a reference to a value stored in the `JsonDocument`.
+> As a consequence, a `JsonVariant` cannot be used as a standalone variable anymore.
+>
+> Old code:
+>
+> ```c++
+> JsonVariant myValue = 42;
+> ```
+>
+> New code:
+>
+> ```c++
+> DynamicJsonDocument doc;
+> JsonVariant myValue = doc.to<JsonVariant>();
+> myValue.set(42);
+> ```
+>
+> #### JsonPair
+>
+> Old code:
+>
+> ```c++
+> for(JsonPair p : myObject) {
+>   Serial.println(p.key);
+>   Serial.println(p.value.as<int>());
+> }
+> ```
+>
+> New code:
+>
+> ```c++
+> for(JsonPair p : myObject) {
+>   Serial.println(p.key());
+>   Serial.println(p.value().as<int>());
+> }
+> ```
+>
+> CAUTION: the key is now read only!
+
+v6.2.3-beta (2018-07-19)
 -----------
 
 * Fixed exception when using Flash strings as object keys (issue #784)
 
-v6.2.2-beta
+v6.2.2-beta (2018-07-18)
 -----------
 
 * Fixed `invalid application of 'sizeof' to incomplete type '__FlashStringHelper'` (issue #783)
 * Fixed `char[]` not duplicated when passed to `JsonVariant::operator[]`
 
-v6.2.1-beta
+v6.2.1-beta (2018-07-17)
 -----------
 
 * Fixed `JsonObject` not inserting keys of type `String` (issue #782)
 
-v6.2.0-beta
+v6.2.0-beta (2018-07-12)
 -----------
 
 * Disabled lazy number deserialization (issue #772)
@@ -46,7 +97,7 @@ v6.2.0-beta
 > object["values"] = serialized("[1,2,3,4]");
 > ```
 
-v6.1.0-beta
+v6.1.0-beta (2018-07-02)
 -----------
 
 * Return `JsonArray` and `JsonObject` by value instead of reference (issue #309)
@@ -76,12 +127,12 @@ v6.1.0-beta
 > }
 > ```
 
-v6.0.1-beta
+v6.0.1-beta (2018-06-11)
 -----------
 
 * Fixed conflicts with `isnan()` and `isinf()` macros (issue #752)
 
-v6.0.0-beta
+v6.0.0-beta (2018-06-07)
 -----------
 
 * Added `DynamicJsonDocument` and `StaticJsonDocument`

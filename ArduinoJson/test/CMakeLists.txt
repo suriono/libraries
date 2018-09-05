@@ -38,7 +38,9 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
 	add_compile_options(
 		-Wstrict-null-sentinel
+		-Wno-vla # Allow VLA in tests
 	)
+	add_definitions(-DHAS_VARIABLE_LENGTH_ARRAY)
 
 	if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.5)
 		add_compile_options(-Wlogical-op) # the flag exists in 4.4 but is buggy
@@ -53,6 +55,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 	add_compile_options(
 		-Wc++11-compat
 		-Wdeprecated-register
+		-Wno-vla-extension # Allow VLA in tests
+	)
+	add_definitions(
+		-DHAS_VARIABLE_LENGTH_ARRAY
+		-DSUBSCRIPT_CONFLICTS_WITH_BUILTIN_OPERATOR
 	)
 endif()
 
@@ -68,6 +75,7 @@ add_subdirectory(DynamicJsonBuffer)
 add_subdirectory(IntegrationTests)
 add_subdirectory(JsonArray)
 add_subdirectory(JsonDeserializer)
+add_subdirectory(JsonDocument)
 add_subdirectory(JsonObject)
 add_subdirectory(JsonSerializer)
 add_subdirectory(JsonVariant)

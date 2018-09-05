@@ -32,11 +32,24 @@ TEST_CASE("JsonObject::remove()") {
     obj["c"] = 2;
 
     for (JsonObject::iterator it = obj.begin(); it != obj.end(); ++it) {
-      if (it->value == 1) obj.remove(it);
+      if (it->value() == 1) obj.remove(it);
     }
 
     std::string result;
     serializeJson(obj, result);
     REQUIRE("{\"a\":0,\"c\":2}" == result);
   }
+
+#ifdef HAS_VARIABLE_LENGTH_ARRAY
+  SECTION("key is a vla") {
+    obj["hello"] = 1;
+
+    int i = 16;
+    char vla[i];
+    strcpy(vla, "hello");
+    obj.remove(vla);
+
+    REQUIRE(0 == obj.size());
+  }
+#endif
 }
