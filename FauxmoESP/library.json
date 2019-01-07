@@ -1,26 +1,35 @@
 {
     "name": "FauxmoESP",
-    "keywords": "belkin,wemo,fauxmo,esp8266,alexa,amazon,echo,dot",
-    "description": "Amazon Alexa support for ESP8266 (Amazon Echo & Dot)",
+    "keywords": "belkin,wemo,fauxmo,esp8266,esp32,alexa,amazon,echo,dot",
+    "description": "Amazon Alexa support for ESP8266 and ESP32 (Amazon Echo & Dot)",
     "repository": {
         "type": "git",
-        "url": "https://bitbucket.org/xoseperez/fauxmoesp.git"
+        "url": "https://bitbucket.org/xoseperez/fauxmoESP"
     },
-    "version": "2.3.0",
+    "version": "3.1.0",
     "license": "MIT",
     "exclude": "tests",
     "frameworks": "arduino",
-    "platforms": ["espressif8266", "espressif8266_stage"],
-    "dependencies": [
-        { "name": "ESPAsyncTCP" }
-    ],
+    "platforms": ["espressif8266", "espressif32"],
     "authors": {
         "name": "Xose Perez",
         "email": "xose.perez@gmail.com",
         "url": "http://tinkerman.cat",
         "maintainer": true
     },
+    "dependencies": [ 
+        {
+            "name": "ESPAsyncTCP",
+            "version": ">=1.2.0",
+            "platforms": "espressif8266"
+        },
+        {
+            "name": "AsyncTCP",
+            "version": ">=1.0.1",
+            "platforms": "espressif32"
+        }
+    ],
     "examples": [
-        "examples/*/src/*.ino"
+        "examples/*/*.ino"
     ]
 }
