@@ -66,8 +66,12 @@ typedef volatile  PORT_t* PORTreg_t; ///< PORT register type
  #define DEFAULT_SPI_FREQ 16000000L  ///< Hardware SPI default speed
 #endif
 
-//#define USE_SPI_DMA                ///< If set, use SPI DMA if available
-// Another "oops" name -- in the future parallel DMA will also be handled.
+#if defined(ADAFRUIT_PYPORTAL) || defined(ADAFRUIT_PYBADGE_M4_EXPRESS) || defined(ADAFRUIT_PYGAMER_M4_EXPRESS)
+ #define USE_SPI_DMA                 ///< Auto DMA if using PyPortal
+#else
+ //#define USE_SPI_DMA               ///< If set, use DMA if available
+#endif
+// Another "oops" name -- this now also handles parallel DMA.
 // If DMA is enabled, Arduino sketch MUST #include <Adafruit_ZeroDMA.h>
 // Estimated RAM usage:
 // 4 bytes/pixel on display major axis + 8 bytes/pixel on minor axis,
@@ -90,7 +94,7 @@ typedef volatile  PORT_t* PORTreg_t; ///< PORT register type
 // an enumerated type as the first argument: tft8 (for 8-bit parallel) or
 // tft16 (for 16-bit)...even though 16-bit isn't fully implemented or tested
 // and might never be, still needed that disambiguation from soft SPI.
-enum tftBusWidth { tft8, tft16 }; ///< For first arg to parallel constructor
+enum tftBusWidth { tft8bitbus, tft16bitbus }; ///< For first arg to parallel constructor
 
 // CLASS DEFINITION --------------------------------------------------------
 
@@ -177,12 +181,18 @@ class Adafruit_SPITFT : public Adafruit_GFX {
     // Brief comments here...documented more thoroughly in .cpp file.
 
     // Subclass' begin() function invokes this to initialize hardware.
+    // freq=0 to use default SPI speed. spiMode must be one of the SPI_MODEn
+    // values defined in SPI.h, which are NOT the same as 0 for SPI_MODE0,
+    // 1 for SPI_MODE1, etc...use ONLY the SPI_MODEn defines! Only!
     // Name is outdated (interface may be parallel) but for compatibility:
-    void         initSPI(uint32_t freq = 0); // 0 = use default SPI speed
+    void         initSPI(uint32_t freq = 0, uint8_t spiMode = SPI_MODE0);
     // Chip select and/or hardware SPI transaction start as needed:
     void         startWrite(void);
     // Chip deselect and/or hardware SPI transaction end as needed:
     void         endWrite(void);
+    void         sendCommand(uint8_t commandByte, uint8_t *dataBytes = NULL, uint8_t numDataBytes = 0);
+    void         sendCommand(uint8_t commandByte, const uint8_t *dataBytes, uint8_t numDataBytes);
+    uint8_t      readcommand8(uint8_t commandByte, uint8_t index = 0);
 
     // These functions require a chip-select and/or SPI transaction
     // around them. Higher-level graphics primitives might start a
@@ -191,7 +201,8 @@ class Adafruit_SPITFT : public Adafruit_GFX {
     // before ending the transaction. It's more efficient than starting a
     // transaction every time.
     void         writePixel(int16_t x, int16_t y, uint16_t color);
-    void         writePixels(uint16_t *colors, uint32_t len);
+    void         writePixels(uint16_t *colors, uint32_t len,
+                   bool block=true, bool bigEndian=false);
     void         writeColor(uint16_t color, uint32_t len);
     void         writeFillRect(int16_t x, int16_t y, int16_t w, int16_t h,
                    uint16_t color);
@@ -206,6 +217,10 @@ class Adafruit_SPITFT : public Adafruit_GFX {
     // CALLING THIS WITH UNCLIPPED OR NEGATIVE VALUES COULD BE DISASTROUS.
     inline void  writeFillRectPreclipped(int16_t x, int16_t y,
                    int16_t w, int16_t h, uint16_t color);
+    // Another new function, companion to the new non-blocking
+    // writePixels() variant.
+    void dmaWait(void);
+
 
     // These functions are similar to the 'write' functions above, but with
     // a chip-select and/or SPI transaction built-in. They're typically used
@@ -371,7 +386,7 @@ class Adafruit_SPITFT : public Adafruit_GFX {
     PORTreg_t     dcPort;          ///< PORT register for data/command
 #endif // end HAS_PORT_SET_CLR
 #endif // end USE_FAST_PINIO
-#if !defined(ARDUINO_STM32_FEATHER)
+#if defined(__cplusplus) && (__cplusplus >= 201100)
     union {
 #endif
       struct {                     //   Values specific to HARDWARE SPI:
@@ -381,6 +396,7 @@ class Adafruit_SPITFT : public Adafruit_GFX {
 #else
         uint32_t    _freq;         ///< SPI bitrate (if no SPI transactions)
 #endif
+        uint32_t    _mode;         ///< SPI data mode (transactions or no)
       } hwspi;                     ///< Hardware SPI values
       struct {                     //   Values specific to SOFTWARE SPI:
 #if defined(USE_FAST_PINIO)
@@ -444,7 +460,7 @@ class Adafruit_SPITFT : public Adafruit_GFX {
         int8_t    _rd;             ///< Read strobe pin # (or -1)
         bool      wide = 0;        ///< If true, is 16-bit interface
       } tft8;                      ///< Parallel interface settings
-#if !defined(ARDUINO_STM32_FEATHER)
+#if defined(__cplusplus) && (__cplusplus >= 201100)
     };                             ///< Only one interface is active
 #endif
 #if defined(USE_SPI_DMA) // Used by hardware SPI and tft8
