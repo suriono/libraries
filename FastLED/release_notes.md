@@ -1,3 +1,39 @@
+FastLED 3.3.3
+=============
+
+* Improved support for ESP32, Teensy4, ATmega16, nRF52, and ARM STM32.  
+* Added animation examples: "TwinkleFox" holiday lights, "Pride2015" moving rainbows, and "Pacifica" gentle ocean waves 
+* Fixed a few bugs including a rare divide-by-zero crash
+* Cleaned up code and examples a bit
+* Said our sad farwells to FastLED founder Daniel Garcia, who we lost in a tragic accident on September 2nd, 2019.  Dan's beautiful code and warm kindness have been at the heart of the library, and our community, for ten years.  FastLED will continue with help from all across the FastLED world, and Dan's spirit will be with us whenever the lights shine and glow.  Thank you, Dan, for everything.
+
+
+FastLED 3.3.2
+=============
+
+* Fix APA102 compile error #870 
+* Normalize pin definition macros so that we can have an .ino file that can be used to output what pin/port mappings should be for a platform
+* Add defnition for ATmega32
+
+FastLED 3.3.1
+=============
+
+* Fix teensy build issue 
+* Bring in sam's RMT timing fix
+
+FastLED 3.3.0
+==============
+* Preliminary Teensy 4 support
+* Fix #861 - power computation for OctoWS2811
+* keywords and other minor changes for compilers (#854, #845)
+* Fix some nrf52 issues (#856), #840
+
+FastLED 3.2.10
+==============
+* Adafruit Metro M4 Airlift support
+* Arduino Nano 33 IOT preliminary definitions
+* Bug fixes
+
 FastLED 3.2.9
 =============
 * Update ItsyBitsy support

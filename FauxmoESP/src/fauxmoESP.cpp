@@ -2,7 +2,7 @@
 
 FAUXMO ESP
 
-Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2016-2020 by Xose Pérez <xose dot perez at gmail dot com>
 
 The MIT License (MIT)
 
@@ -80,7 +80,7 @@ void fauxmoESP::_handleUDP() {
 
         String request = (const char *) data;
         if (request.indexOf("M-SEARCH") >= 0) {
-            if(request.indexOf("upnp:rootdevice") > 0 || request.indexOf("device:basic:1") > 0) {
+            if ((request.indexOf("ssdp:discover") > 0) || (request.indexOf("upnp:rootdevice") > 0) || (request.indexOf("device:basic:1") > 0)) {
                 _sendUDPResponse();
             }
         }
@@ -115,22 +115,49 @@ String fauxmoESP::_deviceJson(unsigned char id) {
 
 	if (id >= _devices.size()) return "{}";
 
-	String mac = WiFi.macAddress();
-    mac.replace(":", "");
-    mac.toLowerCase();
-
 	fauxmoesp_device_t device = _devices[id];
-    char buffer[strlen_P(FAUXMO_DEVICE_JSON_TEMPLATE) + 64];
-    snprintf_P(
+
+  DEBUG_MSG_FAUXMO("[FAUXMO] Sending device info for \"%s\", uniqueID = \"%s\"\n", device.name, device.uniqueid);
+  char buffer[strlen_P(FAUXMO_DEVICE_JSON_TEMPLATE) + 64];
+  snprintf_P(
         buffer, sizeof(buffer),
         FAUXMO_DEVICE_JSON_TEMPLATE,
-        device.name, mac.c_str(), id+1,
+        device.name, device.uniqueid,
         device.state ? "true": "false",
         device.value
     );
 
 	return String(buffer);
 
+}
+
+String fauxmoESP::_byte2hex(uint8_t zahl)
+{
+  String hstring = String(zahl, HEX);
+  if (zahl < 16)
+  {
+    hstring = "0" + hstring;
+  }
+
+  return hstring;
+}
+
+String fauxmoESP::_makeMD5(String text)
+{
+  unsigned char bbuf[16];
+  String hash = "";
+  MD5Builder md5;
+  md5.begin();
+  md5.add(text);
+  md5.calculate();
+  
+  md5.getBytes(bbuf);
+  for (uint8_t i = 0; i < 16; i++)
+  {
+    hash += _byte2hex(bbuf[i]);
+  }
+
+  return hash;
 }
 
 bool fauxmoESP::_onTCPDescription(AsyncClient *client, String url, String body) {
@@ -338,10 +365,14 @@ void fauxmoESP::_onTCPClient(AsyncClient *client) {
 	            client->onData([this, i](void *s, AsyncClient *c, void *data, size_t len) {
 	                _onTCPData(c, data, len);
 	            }, 0);
-
 	            client->onDisconnect([this, i](void *s, AsyncClient *c) {
-	                _tcpClients[i]->free();
-	                _tcpClients[i] = NULL;
+			if(_tcpClients[i] != NULL) {
+	                    _tcpClients[i]->free();
+	                    _tcpClients[i] = NULL;
+	                }
+			else {
+	                    DEBUG_MSG_FAUXMO("[FAUXMO] Client %d already disconnected\n", i);
+	                }
 	                delete c;
 	                DEBUG_MSG_FAUXMO("[FAUXMO] Client #%d disconnected\n", i);
 	            }, 0);
@@ -394,6 +425,11 @@ fauxmoESP::~fauxmoESP() {
 
 }
 
+void fauxmoESP::setDeviceUniqueId(unsigned char id, const char *uniqueid)
+{
+    strncpy(_devices[id].uniqueid, uniqueid, FAUXMO_DEVICE_UNIQUE_ID_LENGTH);
+}
+
 unsigned char fauxmoESP::addDevice(const char * device_name) {
 
     fauxmoesp_device_t device;
@@ -401,9 +437,20 @@ unsigned char fauxmoESP::addDevice(const char * device_name) {
 
     // init properties
     device.name = strdup(device_name);
-	device.state = false;
-	device.value = 0;
+  	device.state = false;
+	  device.value = 0;
 
+    // create the uniqueid
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    mac.toLowerCase();
+
+    // To create the uniqueID, we use the device's MAC, add the device name
+    // then use a truncated MD5 hash to create an ID that is unique and repeatable
+    mac.concat(device.name); 
+    String hash = _makeMD5(mac).substring(0,FAUXMO_DEVICE_UNIQUE_ID_LENGTH);  
+    strcpy(device.uniqueid, hash.c_str());
+    
     // Attach
     _devices.push_back(device);
 

@@ -2,7 +2,7 @@
 
 FAUXMO ESP
 
-Copyright (C) 2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2018-2020 by Xose Pérez <xose dot perez at gmail dot com>
 
 The MIT License (MIT)
 
@@ -43,7 +43,7 @@ PROGMEM const char FAUXMO_TCP_STATE_RESPONSE[] = "["
 PROGMEM const char FAUXMO_DEVICE_JSON_TEMPLATE[] = "{"
     "\"type\":\"Extended Color Light\","
     "\"name\":\"%s\","
-    "\"uniqueid\":\"%s-%d\","
+    "\"uniqueid\":\"%s\","
     "\"modelid\":\"LCT007\","
     "\"state\":{"
         "\"on\":%s,\"bri\":%d,\"xy\":[0,0],\"reachable\": true"

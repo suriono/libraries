@@ -24,10 +24,10 @@ THE SOFTWARE.
 
 /* This driver reads quaternion data from the MPU6060 and sends
    Open Sound Control messages.
-
-  GY-521  NodeMCU
+  
+  GY-521  ESP32
   MPU6050 devkit 1.0
-  board   Lolin         Description
+  board   ESP8266        Description
   ======= ==========    ====================================================
   VCC     VU (5V USB)   Not available on all boards so use 3.3V if needed.
   GND     G             Ground
@@ -91,12 +91,7 @@ VectorInt16 aa;         // [x, y, z]            accel sensor measurements
 VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
 VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
 VectorFloat gravity;    // [x, y, z]            gravity vector
-#ifdef OUTPUT_READABLE_EULER
-float euler[3];         // [psi, theta, phi]    Euler angle container
-#endif
-#ifdef OUTPUT_READABLE_YAWPITCHROLL
-float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
-#endif
+
 
 // uncomment "OUTPUT_READABLE_QUATERNION" if you want to see the actual
 // quaternion components in a [w, x, y, z] format (not best for parsing
@@ -132,6 +127,14 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 // uncomment "OUTPUT_TEAPOT_OSC" if you want output that matches the
 // format used for the InvenSense teapot demo
 #define OUTPUT_TEAPOT_OSC
+
+
+#ifdef OUTPUT_READABLE_EULER
+float euler[3];         // [psi, theta, phi]    Euler angle container
+#endif
+#ifdef OUTPUT_READABLE_YAWPITCHROLL
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+#endif
 
 #define INTERRUPT_PIN 15 // use pin 15 on ESP8266
 
@@ -363,7 +366,11 @@ void loop(void)
     Serial.println();
     Serial.println("*** Disconnected from AP so rebooting ***");
     Serial.println();
+    #if defined(ESP8266)
     ESP.reset();
+    #else
+    ESP.restart();
+    #endif
   }
 
   mpu_loop();
