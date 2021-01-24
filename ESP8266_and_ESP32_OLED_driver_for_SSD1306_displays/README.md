@@ -4,7 +4,7 @@
 
 > We just released version 4.0.0. Please have a look at our [upgrade guide](UPGRADE-4.0.md)
 
-This is a driver for SSD1306 128x64 and 128x32 OLED displays running on the Arduino/ESP8266 & ESP32 and mbed-os platforms.
+This is a driver for SSD1306 128x64, 128x32, 64x48 and 64x32 OLED displays running on the Arduino/ESP8266 & ESP32 and mbed-os platforms.
 Can be used with either the I2C or SPI version of the display.
 
 You can either download this library as a zip file and unpack it to your Arduino/libraries folder or find it in the Arduino library manager under "ESP8266 and ESP32 Oled Driver for SSD1306 display". For mbed-os a copy of the files are available as an mbed-os library. 
@@ -76,6 +76,11 @@ The library supports different protocols to access the OLED display. Currently t
 SSD1306Wire display(0x3c, SDA, SCL);  // ADDRESS, SDA, SCL
 // for 128x32 displays:
 // SSD1306Wire display(0x3c, SDA, SCL, GEOMETRY_128_32);  // ADDRESS, SDA, SCL, GEOMETRY_128_32 (or 128_64)
+// for using 2nd Hardware I2C (if available)
+// SSD1306Wire(0x3c, SDA, SCL, GEOMETRY_128_64, I2C_TWO); //default value is I2C_ONE if not mentioned
+// By default SD1306Wire set I2C frequency to 700000, you can use set either another frequency or skip setting the frequency by providing -1 value
+// SSD1306Wire(0x3c, SDA, SCL, GEOMETRY_128_64, I2C_ONE, 400000); //set I2C frequency to 400kHz
+// SSD1306Wire(0x3c, SDA, SCL, GEOMETRY_128_64, I2C_ONE, -1); //skip setting the I2C bus frequency
 ```
 
 for a SH1106:
@@ -84,6 +89,9 @@ for a SH1106:
 #include "SH1106Wire.h"
 
 SH1106Wire display(0x3c, SDA, SCL);  // ADDRESS, SDA, SCL
+// By default SH1106Wire set I2C frequency to 700000, you can use set either another frequency or skip setting the frequency by providing -1 value
+// SH1106Wire(0x3c, SDA, SCL, GEOMETRY_128_64, I2C_ONE, 400000); //set I2C frequency to 400kHz
+// SH1106Wire(0x3c, SDA, SCL, GEOMETRY_128_64, I2C_ONE, -1); //skip setting the I2C bus frequency
 ```
 
 ### I2C with brzo_i2c
@@ -174,6 +182,7 @@ void mirrorScreen();
 
 /* Drawing functions */
 // Sets the color of all pixel operations
+// color : BLACK, WHITE, INVERSE
 void setColor(OLEDDISPLAY_COLOR color);
 
 // Draw a pixel at given position
@@ -416,4 +425,5 @@ This shows the code working on the SPI version of the display. See demo code for
  * [QRCode ESP8266](https://github.com/anunpanya/ESP8266_QRcode) (by @anunpanya)
  * [Scan I2C](https://github.com/hallard/Scan-I2C-WiFi) (by @hallard)
  * [ThingPulse Weather Station](https://github.com/ThingPulse/esp8266-weather-station)
+ * [Meshtastic](https://www.meshtastic.org/) - an open source GPS communicator mesh radio
  * Yours?

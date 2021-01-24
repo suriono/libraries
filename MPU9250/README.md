@@ -23,13 +23,17 @@ void setup() {
 
 void loop() {
     if (mpu.update()) {
-        mpu.printRollPitchYaw();
+        Serial.print(mpu.getYaw()); Serial.print(", ");
+        Serial.print(mpu.getPitch()); Serial.print(", ");
+        Serial.println(mpu.getRoll());
     }
 }
 ```
 
 ### Calibration
 
+- accel/gyro/mag offsets are **NOT stored** to register if the MPU has powered off ([app note](https://www.digikey.com/en/pdf/i/invensense/mpu-hardware-offset-registers))
+- need to **set all offsets at every bootup by yourself** (or calibrate at every bootup)
 - device should be stay still during accel/gyro calibration
 - round device around during mag calibration
 
@@ -51,12 +55,14 @@ void setup() {
     // calibrate anytime you want to
     mpu.calibrateAccelGyro();
     mpu.calibrateMag();
-
-    mpu.printCalibration();
 }
 
 void loop() { }
 ```
+
+### Coordinate
+
+The coordinate of quaternion and euler angles are based on the axes of acceleration and gyro sensors (Right-Handed, X-forward, Z-up). On the other hand, roll, pitch, and yaw angles are basedd on airplane coordinate (Right-Handed, X-forward, Z-down). Please use `getEulerX/Y/Z()` for euler angles and `getRoll/Pitch/Yaw()` for airplane coordinate angles.
 
 
 ## Other Settings
@@ -157,6 +163,18 @@ You can find magnetic declination in your city [here](http://www.magnetic-declin
 For more details, see [wiki](https://en.wikipedia.org/wiki/Magnetic_declination).
 
 
+### Quaternion Filter
+
+You can choose quaternion filter using `void selectFilter(QuatFilterSel sel)`. Available quaternion filters are listed below.
+
+```C++
+enum class QuatFilterSel {
+    NONE,
+    MADGWICK, // default
+    MAHONY,
+};
+```
+
 
 ### Other I2C library
 
@@ -186,8 +204,10 @@ MPU9255 mpu;
 ``` C++
 bool setup(const uint8_t addr, const MPU9250Setting& setting, WireType& w = Wire);
 void verbose(const bool b);
+void ahrs(const bool b);
 void calibrateAccelGyro();
 void calibrateMag();
+bool isConnected();
 bool isConnectedMPU9250();
 bool isConnectedAK8963();
 bool available();
@@ -197,7 +217,9 @@ float getRoll() const;
 float getPitch() const;
 float getYaw() const;
 
-float getQuaternion(uint8_t i) const;
+float getEulerX() const;
+float getEulerY() const;
+float getEulerZ() const;
 
 float getQuaternionX() const;
 float getQuaternionY() const;
@@ -207,6 +229,7 @@ float getQuaternionW() const;
 float getAcc(const uint8_t i) const;
 float getGyro(const uint8_t i) const;
 float getMag(const uint8_t i) const;
+float getLinearAcc(const uint8_t i) const;
 
 float getAccX() const;
 float getAccY() const;
@@ -217,6 +240,9 @@ float getGyroZ() const;
 float getMagX() const;
 float getMagY() const;
 float getMagZ() const;
+float getLinearAccX() const;
+float getLinearAccY() const;
+float getLinearAccZ() const;
 
 float getAccBias(const uint8_t i) const;
 float getGyroBias(const uint8_t i) const;
@@ -238,32 +264,14 @@ float getMagScaleZ() const;
 
 float getTemperature() const;
 
-void setAccBias(const uint8_t i, const float v);
-void setGyroBias(const uint8_t i, const float v);
-void setMagBias(const uint8_t i, const float v);
-void setMagScale(const uint8_t i, const float v);
-
-void setAccBiasX(const float v);
-void setAccBiasY(const float v);
-void setAccBiasZ(const float v);
-void setGyroBiasX(const float v);
-void setGyroBiasY(const float v);
-void setGyroBiasZ(const float v);
-void setMagBiasX(const float v);
-void setMagBiasY(const float v);
-void setMagBiasZ(const float v);
-void setMagScaleX(const float v);
-void setMagScaleY(const float v);
-void setMagScaleZ(const float v);
-
+void setAccBias(const float x, const float y, const float z);
+void setGyroBias(const float x, const float y, const float z);
+void setMagBias(const float x, const float y, const float z);
+void setMagScale(const float x, const float y, const float z);
 void setMagneticDeclination(const float d);
 
+void selectFilter(QuatFilterSel sel);
 bool selftest();
-
-void print() const;
-void printRawData() const;
-void printRollPitchYaw() const;
-void printCalibration() const;
 ```
 
 ## License
