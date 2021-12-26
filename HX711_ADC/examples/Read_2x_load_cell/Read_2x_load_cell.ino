@@ -9,7 +9,9 @@
 // Settling time (number of samples) and data filtering can be adjusted in the config.h file
 
 #include <HX711_ADC.h>
+#if defined(ESP8266)|| defined(ESP32) || defined(AVR)
 #include <EEPROM.h>
+#endif
 
 //pins:
 const int HX711_dout_1 = 4; //mcu > HX711 no 1 dout pin
@@ -43,6 +45,8 @@ void setup() {
 
   LoadCell_1.begin();
   LoadCell_2.begin();
+  //LoadCell_1.setReverseOutput();
+  //LoadCell_2.setReverseOutput();
   unsigned long stabilizingtime = 2000; // tare preciscion can be improved by adding a few seconds of stabilizing time
   boolean _tare = true; //set this to false if you don't want tare to be performed in the next step
   byte loadcell_1_rdy = 0;

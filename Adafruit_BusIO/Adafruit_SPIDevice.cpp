@@ -1,10 +1,12 @@
-#include <Adafruit_SPIDevice.h>
-#include <Arduino.h>
+#include "Adafruit_SPIDevice.h"
+
+#if !defined(SPI_INTERFACES_COUNT) ||                                          \
+    (defined(SPI_INTERFACES_COUNT) && (SPI_INTERFACES_COUNT > 0))
 
 //#define DEBUG_SERIAL Serial
 
 /*!
- *    @brief  Create an SPI device with the given CS pin and settins
+ *    @brief  Create an SPI device with the given CS pin and settings
  *    @param  cspin The arduino pin number to use for chip select
  *    @param  freq The SPI clock frequency to use, defaults to 1MHz
  *    @param  dataOrder The SPI data order to use for bits within each byte,
@@ -13,8 +15,8 @@
  *    @param  theSPI The SPI bus to use, defaults to &theSPI
  */
 Adafruit_SPIDevice::Adafruit_SPIDevice(int8_t cspin, uint32_t freq,
-                                       BitOrder dataOrder, uint8_t dataMode,
-                                       SPIClass *theSPI) {
+                                       BusIOBitOrder dataOrder,
+                                       uint8_t dataMode, SPIClass *theSPI) {
   _cs = cspin;
   _sck = _mosi = _miso = -1;
   _spi = theSPI;
@@ -26,7 +28,7 @@ Adafruit_SPIDevice::Adafruit_SPIDevice(int8_t cspin, uint32_t freq,
 }
 
 /*!
- *    @brief  Create an SPI device with the given CS pin and settins
+ *    @brief  Create an SPI device with the given CS pin and settings
  *    @param  cspin The arduino pin number to use for chip select
  *    @param  sckpin The arduino pin number to use for SCK
  *    @param  misopin The arduino pin number to use for MISO, set to -1 if not
@@ -40,7 +42,7 @@ Adafruit_SPIDevice::Adafruit_SPIDevice(int8_t cspin, uint32_t freq,
  */
 Adafruit_SPIDevice::Adafruit_SPIDevice(int8_t cspin, int8_t sckpin,
                                        int8_t misopin, int8_t mosipin,
-                                       uint32_t freq, BitOrder dataOrder,
+                                       uint32_t freq, BusIOBitOrder dataOrder,
                                        uint8_t dataMode) {
   _cs = cspin;
   _sck = sckpin;
@@ -437,3 +439,5 @@ bool Adafruit_SPIDevice::write_then_read(uint8_t *write_buffer,
 
   return true;
 }
+
+#endif // SPI exists

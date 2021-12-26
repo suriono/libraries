@@ -1,4 +1,5 @@
 # MPU9250
+
 Arduino library for [MPU9250](https://www.invensense.com/products/motion-tracking/9-axis/mpu-9250/) Nine-Axis (Gyro + Accelerometer + Compass) MEMS MotionTracking™ Device
 
 This library is based on the [great work](https://github.com/kriswiner/MPU9250) by [kriswiner](https://github.com/kriswiner), and re-writen for the simple usage.
@@ -7,11 +8,10 @@ This library is based on the [great work](https://github.com/kriswiner/MPU9250) 
 
 ### Simple Measurement
 
-``` C++
+```C++
 #include "MPU9250.h"
 
-MPU9250 mpu;
-// MPU9255 mpu; // You can also use MPU9255
+MPU9250 mpu; // You can also use MPU9255 as is
 
 void setup() {
     Serial.begin(115200);
@@ -37,11 +37,10 @@ void loop() {
 - device should be stay still during accel/gyro calibration
 - round device around during mag calibration
 
-``` C++
+```C++
 #include "MPU9250.h"
 
-MPU9250 mpu;
-// MPU9255 mpu; // You can also use MPU9255
+MPU9250 mpu; // You can also use MPU9255 as is
 
 void setup() {
     Serial.begin(115200);
@@ -62,8 +61,7 @@ void loop() { }
 
 ### Coordinate
 
-The coordinate of quaternion and euler angles are based on the axes of acceleration and gyro sensors (Right-Handed, X-forward, Z-up). On the other hand, roll, pitch, and yaw angles are basedd on airplane coordinate (Right-Handed, X-forward, Z-down). Please use `getEulerX/Y/Z()` for euler angles and `getRoll/Pitch/Yaw()` for airplane coordinate angles.
-
+The coordinate of quaternion and roll/pitch/yaw angles are basedd on airplane coordinate (Right-Handed, X-forward, Z-down). On the other hand, the coordinate of euler angle is based on the axes of acceleration and gyro sensors (Right-Handed, X-forward, Z-up).Please use `getEulerX/Y/Z()` for euler angles and `getRoll/Pitch/Yaw()` for airplane coordinate angles.
 
 ## Other Settings
 
@@ -71,16 +69,15 @@ The coordinate of quaternion and euler angles are based on the axes of accelerat
 
 You must set your own address based on A0, A1, A2 setting as:
 
-``` C++
+```C++
 mpu.setup(0x70);
 ```
-
 
 ### Customize MPU9250 Configuration
 
 You can set your own setting using `MPU9250Setting` struct as:
 
-``` C++
+```C++
 MPU9250Setting setting;
 setting.accel_fs_sel = ACCEL_FS_SEL::A16G;
 setting.gyro_fs_sel = GYRO_FS_SEL::G2000DPS;
@@ -95,7 +92,6 @@ mpu.setup(0x68, setting);
 ```
 
 See `custom_setting.ino` example for detail.
-
 
 #### List of Settings
 
@@ -162,7 +158,6 @@ You can find magnetic declination in your city [here](http://www.magnetic-declin
 
 For more details, see [wiki](https://en.wikipedia.org/wiki/Magnetic_declination).
 
-
 ### Quaternion Filter
 
 You can choose quaternion filter using `void selectFilter(QuatFilterSel sel)`. Available quaternion filters are listed below.
@@ -175,13 +170,18 @@ enum class QuatFilterSel {
 };
 ```
 
+You can also change the calculate iterations for the filter as follows. The default value is 1. Generally 10-20 is good for stable yaw estimation. Please see [this discussion](https://github.com/kriswiner/MPU9250/issues/420) for the detail.
+
+```C++
+mpu.setFilterIterations(10);
+```
 
 ### Other I2C library
 
 You can use other I2C library e.g. [SoftWire](https://github.com/stevemarple/SoftWire).
 
-``` C++
-MPU9250_<SoftWire, MPU9250_WHOAMI_DEFAULT_VALUE> mpu;
+```C++
+MPU9250_<SoftWire> mpu;
 SoftWire sw(SDA, SCL);
 
 // you need setting struct
@@ -191,27 +191,36 @@ MPU9250Setting setting;
 mpu.setup(0x70, setting, sw);
 ```
 
-### MPU9255
+## About I2C Errors
 
-To use MPU9255 instead of MPU9250, just declare MPU9255.
+Sometimes this library shows the I2C error number if your connection is not correct. It's based on the I2C error number which is reported by the `Wire.endTransmission()`. It returns following number based on the result of I2C data transmission.
 
-```C++
-MPU9255 mpu;
-```
+> 0:success
+> 1:data too long to fit in transmit buffer
+> 2:received NACK on transmit of address
+> 3:received NACK on transmit of data
+> 4:other error
+
+If you have such errors, please check your hardware connection and I2C address setting first. Please refer [Wire.endTransmission() reference](https://www.arduino.cc/en/Reference/WireEndTransmission) for these errors, and [section 2.3 of this explanation](https://www.ti.com/lit/an/slva704/slva704.pdf) for ACK and NACK.
 
 ## APIs
 
-``` C++
+```C++
 bool setup(const uint8_t addr, const MPU9250Setting& setting, WireType& w = Wire);
 void verbose(const bool b);
 void ahrs(const bool b);
+void sleep(bool b);
 void calibrateAccelGyro();
 void calibrateMag();
 bool isConnected();
 bool isConnectedMPU9250();
 bool isConnectedAK8963();
+bool isSleeping();
 bool available();
 bool update();
+void update_accel_gyro();
+void update_mag();
+void update_rpy(float qw, float qx, float qy, float qz);
 
 float getRoll() const;
 float getPitch() const;
@@ -271,6 +280,8 @@ void setMagScale(const float x, const float y, const float z);
 void setMagneticDeclination(const float d);
 
 void selectFilter(QuatFilterSel sel);
+void setFilterIterations(const size_t n);
+
 bool selftest();
 ```
 

@@ -96,7 +96,7 @@ int HX711_ADC::startMultiple(unsigned long t)
 			}
 			isFirst = 0;
 		}	
-		if(millis() - startMultipleTimeStamp > startMultipleWaitTime) {
+		if((millis() - startMultipleTimeStamp) < startMultipleWaitTime) {
 			update(); //do conversions during stabilization time
 			yield();
 			return 0;
@@ -145,7 +145,7 @@ int HX711_ADC::startMultiple(unsigned long t, bool dotare)
 			}
 			isFirst = 0;
 		}	
-		if(millis() - startMultipleTimeStamp > startMultipleWaitTime) {
+		if((millis() - startMultipleTimeStamp) < startMultipleWaitTime) {
 			update(); //do conversions during stabilization time
 			yield();
 			return 0;
@@ -205,6 +205,7 @@ void HX711_ADC::tareNoDelay()
 {
 	doTare = 1;
 	tareTimes = 0;
+	tareStatus = 0;
 }
 
 //set new calibration factor, raw data is divided by this value to convert to readable data
@@ -320,6 +321,9 @@ void HX711_ADC::conversion24bit()  //read 24 bit data, store in dataset and star
 	{
 		dataOutOfRange = 1;
 		//Serial.println("dataOutOfRange");
+	}
+	if (reverseVal) {
+		data = 0xFFFFFF - data;
 	}
 	if (readIndex == samplesInUse + IGN_HIGH_SAMPLE + IGN_LOW_SAMPLE - 1) 
 	{
@@ -504,3 +508,9 @@ bool HX711_ADC::getSignalTimeoutFlag()
 {
 	return signalTimeoutFlag;
 }
+
+//reverse the output value (flip positive/negative value)
+//tare/zero-offset must be re-set after calling this.
+void HX711_ADC::setReverseOutput() {
+	reverseVal = true;
+}				
