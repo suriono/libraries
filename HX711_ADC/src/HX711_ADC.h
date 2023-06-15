@@ -2,7 +2,7 @@
    -------------------------------------------------------------------------------------
    HX711_ADC
    Arduino library for HX711 24-Bit Analog-to-Digital Converter for Weight Scales
-   Olav Kallhovd sept2017
+   Olav Kallhovd sept2017 
    -------------------------------------------------------------------------------------
 */
 
@@ -64,6 +64,7 @@ class HX711_ADC
 		void setCalFactor(float cal); 				//set new calibration factor, raw data is divided by this value to convert to readable data
 		float getCalFactor(); 						//returns the current calibration factor
 		float getData(); 							//returns data from the moving average dataset 
+
 		int getReadIndex(); 						//for testing and debugging
 		float getConversionTime(); 					//for testing and debugging
 		float getSPS();								//for testing and debugging
@@ -75,6 +76,8 @@ class HX711_ADC
 		long getTareOffset();						//get the tare offset (raw data value output without the scale "calFactor")
 		void setTareOffset(long newoffset);			//set new tare offset (raw data value input without the scale "calFactor")
 		uint8_t update(); 							//if conversion is ready; read out 24 bit data and add to dataset
+		bool dataWaitingAsync(); 					//checks if data is available to read (no conversion yet)
+		bool updateAsync(); 						//read available data and add to dataset 
 		void setSamplesInUse(int samples);			//overide number of samples in use
 		int getSamplesInUse();						//returns current number of samples in use
 		void resetSamplesIndex();					//resets index for dataset
@@ -93,22 +96,22 @@ class HX711_ADC
 		float calFactor = 1.0;						//calibration factor as given in function setCalFactor(float cal)
 		float calFactorRecip = 1.0;					//reciprocal calibration factor (1/calFactor), the HX711 raw data is multiplied by this value
 		volatile long dataSampleSet[DATA_SET + 1];	// dataset, make voltile if interrupt is used 
-		long tareOffset;
+		long tareOffset = 0;
 		int readIndex = 0;
-		unsigned long conversionStartTime;
-		unsigned long conversionTime;
+		unsigned long conversionStartTime = 0;
+		unsigned long conversionTime = 0;
 		uint8_t isFirst = 1;
-		uint8_t tareTimes;
+		uint8_t tareTimes = 0;
 		uint8_t divBit = DIVB;
 		const uint8_t divBitCompiled = DIVB;
-		bool doTare;
-		bool startStatus;
-		unsigned long startMultipleTimeStamp;
-		unsigned long startMultipleWaitTime;
-		uint8_t convRslt;
-		bool tareStatus;
+		bool doTare = 0;
+		bool startStatus = 0;
+		unsigned long startMultipleTimeStamp = 0;
+		unsigned long startMultipleWaitTime = 0;
+		uint8_t convRslt = 0;
+		bool tareStatus = 0;
 		unsigned int tareTimeOut = (SAMPLES + IGN_HIGH_SAMPLE + IGN_HIGH_SAMPLE) * 150; // tare timeout time in ms, no of samples * 150ms (10SPS + 50% margin)
-		bool tareTimeoutFlag;
+		bool tareTimeoutFlag = 0;
 		bool tareTimeoutDisable = 0;
 		int samplesInUse = SAMPLES;
 		long lastSmoothedData = 0;
@@ -116,6 +119,7 @@ class HX711_ADC
 		unsigned long lastDoutLowTime = 0;
 		bool signalTimeoutFlag = 0;
 		bool reverseVal = 0;
+		bool dataWaiting = 0;
 };	
 
 #endif

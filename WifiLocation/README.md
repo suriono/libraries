@@ -4,7 +4,7 @@
 # WiFi Location
 
 > ## Important notice:
-> Since July 2018, Google's conditions for Maps APIs have changed. You have to assign a billing method to it so that you are able to use it. Check more information here: https://cloud.google.com/maps-platform/pricing/. Be careful about number of request you make using this library. There is a free tier but you know this can change in any moment. I am not responsible of billing cost caused by use of Google API.
+> Since July 2018, Google's conditions for Maps APIs have changed. **You have to assign a billing method o Google Cloud Console** to it so that you are able to use it. Check more information here: https://cloud.google.com/maps-platform/pricing/. Be careful about number of request you make using this library. There is a free tier but you know this can change in any moment. I am not responsible of billing cost caused by use of Google API.
 
 > ## Platform compatibility:
 > Support of SAMD microcontrollers have been deprecated. If you use MKR series boards from Arduino you can keep using version 1.2.5.
@@ -13,12 +13,19 @@
 > ## Google CA certificate expiration
 > Current Google CA certificate will expire on Jan 28th 2028. This is needed to validate security Google API address. I'll update it as soon Google release a new one. But keep in mind that you will need to update before that date to keep this library working
 
+> ## Bing Maps CA certificate expiration
+> Current Bing Maps CA certificate will expire on May 15th 2025. This is needed to validate security Bing Maps API address. I'll update it as soon Microsoft release a new one. But keep in mind that you will need to update before that date to keep this library working
+
 ## Introduction
 When location information is needed in an electronic project, we normally think about a GPS module. But we know that mobile phones can get approximate location listening WiFi signals, when GPS is disabled or not usable because we are inside a building.
 
 If your project needs approximate location or you are indoors, and it is connected to the Internet, you can use same mechanism to get latitude and longitude. So, you don't need additional hardware.
 
 This code uses access to Google Maps GeoLocation API. Please check [Google Policies](https://developers.google.com/maps/documentation/geolocation/policies).
+
+After version 1.3.0, this library will use Bing Maps GeoLocation API to get real address from latitude and longitude.
+
+Both functions are independent and can be used separately.
 
 ## Description
 This is a library that sends Google Maps GeoLocaion API a request with a list of all WiFi AP's BSSID that your microcontroller listens to. Google, then answer with location and accuracy in JSON format.
@@ -69,13 +76,36 @@ openssl s_client -servername www.googleapis.com -showcerts \
  > googleCA.cer
 ```
 
-Then, you can copy file content and overwrite [this part](https://github.com/gmag11/WifiLocation/blob/dev/src/WifiLocation.cpp#L14-L38) of `WifiLocation.cpp`, from line 14.
+Then, you can copy file content and overwrite [this part](https://github.com/gmag11/WifiLocation/blob/dev/src/WifiLocation.cpp#L24-L44) of `WifiLocation.cpp`, from line 24.
+
+## Getting real address from location
+
+From version 1.3.0, this library also provides a function to get real address from latitude and longitude. With it you can get address from your current location or from any other latitude and longitude coordinates.
+
+This feature uses Bing Maps API and needs an additional API key. This API is free for use for 1 million requests per year. But Microsoft may change this in the future.
+
+In order to get an API key, navigate to [Bing Maps Developer Center](https://www.bingmapsportal.com).
+
+Details about this API can be found in https://docs.microsoft.com/en-us/bingmaps/rest-services/locations/find-a-location-by-point.
+
+Bing Maps Root CA certificate is also included in this library. It is valid until May 15th 2025. You can get a new valid CA certificate with:
+
+``` bash
+openssl s_client -servername dev.virtualearth.net -showcerts \
+ -connect dev.virtualearth.net:443 < /dev/null \
+ |  awk '/^-----BEGIN CERTIFICATE-----/,/^-----END CERTIFICATE-----/{if(++m==1)n++;if(n==2)print;if(/^-----END CERTIFICATE-----/)m=0}' \
+ > bingMapsCA.cer
+```
+
+You can copy file content and overwrite [this part](https://github.com/gmag11/WifiLocation/blob/dev/src/bingMapsGeocoding.cpp#L16-L36) of `bingMapsGeocoding.cpp`, from line 16.
 
 ## Required libraries
 
-Using this code on ESP8266 or ESP32 platform does not require any external library.
+Using this code on ESP8266 or ESP32 requires [ArduinoJson](https://github.com/bblanchon/ArduinoJson) for Bing Maps Geocoding response processing and [QuickDebug](https://github.com/gmag11/QuickDebug) library for Debug Messages.
 
-In order to compile this on MRK1000, WiFi101 library is needed.
+There are a couple of examples that make use of this feature:
+- BingMApsGeo.ino just use hardcoded coordinates to get real address
+- LocationAndGeo.ino uses WiFi to get current location and then it passes it to Bing Maps API to get real address
 
 ## Limitations
 
