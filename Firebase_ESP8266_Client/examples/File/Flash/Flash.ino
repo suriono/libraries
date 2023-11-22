@@ -1,32 +1,31 @@
 /**
  * Created by K. Suwatchai (Mobizt)
- * 
- * Email: k_suwatchai@hotmail.com
- * 
- * Github: https://github.com/mobizt
- * 
- * Copyright (c) 2021 mobizt
  *
-*/
+ * Email: k_suwatchai@hotmail.com
+ *
+ * Github: https://github.com/mobizt/Firebase-ESP32
+ *
+ * Copyright (c) 2023 mobizt
+ *
+ */
 
-//This example shows how to store and read binary data from file on Flash memory to database.
+// This example shows how to store and read binary data from file on Flash memory to database.
 
-#if defined(ESP32)
-#include <WiFi.h>
-#include <FirebaseESP32.h>
-#elif defined(ESP8266)
+#include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <FirebaseESP8266.h>
-#endif
 
-//Provide the token generation process info.
-#include "addons/TokenHelper.h"
-//Provide the RTDB payload printing info and other helper functions.
-#include "addons/RTDBHelper.h"
+// Provide the token generation process info.
+#include <addons/TokenHelper.h>
+
+// Provide the RTDB payload printing info and other helper functions.
+#include <addons/RTDBHelper.h>
 
 /* 1. Define the WiFi credentials */
 #define WIFI_SSID "WIFI_AP"
 #define WIFI_PASSWORD "WIFI_PASSWORD"
+
+// For the following credentials, see examples/Authentications/SignInAsUser/EmailPassword/EmailPassword.ino
 
 /* 2. Define the API Key */
 #define API_KEY "API_KEY"
@@ -38,7 +37,7 @@
 #define USER_EMAIL "USER_EMAIL"
 #define USER_PASSWORD "USER_PASSWORD"
 
-//Define Firebase Data object
+// Define Firebase Data object
 FirebaseData fbdo;
 
 FirebaseAuth auth;
@@ -48,10 +47,14 @@ bool taskCompleted = false;
 
 fs::File file;
 
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+WiFiMulti multi;
+#endif
+
 /*
 
-To use LittleFS file system instead of SPIFFS. add #define USE_LITTLEFS to FirebaseFS.h 
-and replace all SPIFFS class in this sketch with LittleFS 
+To use LittleFS file system instead of SPIFFS. add #define USE_LITTLEFS to FirebaseFS.h
+and replace all SPIFFS class in this sketch with LittleFS
 
 */
 
@@ -59,15 +62,24 @@ void setup()
 {
 
   Serial.begin(115200);
-  Serial.println();
-  Serial.println();
 
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+  multi.addAP(WIFI_SSID, WIFI_PASSWORD);
+  multi.run();
+#else
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#endif
+
   Serial.print("Connecting to Wi-Fi");
+  unsigned long ms = millis();
   while (WiFi.status() != WL_CONNECTED)
   {
     Serial.print(".");
     delay(300);
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+    if (millis() - ms > 10000)
+      break;
+#endif
   }
   Serial.println();
   Serial.print("Connected with IP: ");
@@ -87,14 +99,29 @@ void setup()
   config.database_url = DATABASE_URL;
 
   /* Assign the callback function for the long running token generation task */
-  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+  config.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h
+
+  // Comment or pass false value when WiFi reconnection will control by your code or third party library e.g. WiFiManager
+  Firebase.reconnectNetwork(true);
+
+  // Since v4.4.x, BearSSL engine was used, the SSL buffer need to be set.
+  // Large data transmission may require larger RX buffer, otherwise connection issue or data read time out can be occurred.
+  fbdo.setBSSLBufferSize(4096 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
+
+  // The WiFi credentials are required for Pico W
+  // due to it does not have reconnect feature.
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+  config.wifi.clearAP();
+  config.wifi.addAP(WIFI_SSID, WIFI_PASSWORD);
+#endif
+
+  // Or use legacy authenticate method
+  // config.database_url = DATABASE_URL;
+  // config.signer.tokens.legacy_token = "<database secret>";
+
+  // To connect without auth in Test Mode, see Authentications/TestMode/TestMode.ino
 
   Firebase.begin(&config, &auth);
-
-  //Or use legacy authenticate method
-  //Firebase.begin(DATABASE_URL, "<database secret>");
-
-  Firebase.reconnectWiFi(true);
 
   if (!DEFAULT_FLASH_FS.begin())
   {
@@ -103,14 +130,14 @@ void setup()
     return;
   }
 
-  //Delete demo files
+  // Delete demo files
   if (DEFAULT_FLASH_FS.exists("/file1.txt"))
     DEFAULT_FLASH_FS.remove("/file1.txt");
 
   if (DEFAULT_FLASH_FS.exists("/file2.txt"))
     DEFAULT_FLASH_FS.remove("/file2.txt");
 
-  //Write demo data to file
+  // Write demo data to file
   file = DEFAULT_FLASH_FS.open("/file1.txt", "w");
   uint8_t v = 0;
   for (int i = 0; i < 512; i++)
@@ -122,21 +149,69 @@ void setup()
   file.close();
 }
 
+// The Firebase download callback function
+void rtdbDownloadCallback(RTDB_DownloadStatusInfo info)
+{
+  if (info.status == firebase_rtdb_download_status_init)
+  {
+    Serial.printf("Downloading file %s (%d) to %s\n", info.remotePath.c_str(), info.size, info.localFileName.c_str());
+  }
+  else if (info.status == firebase_rtdb_download_status_download)
+  {
+    Serial.printf("Downloaded %d%s\n", (int)info.progress, "%");
+  }
+  else if (info.status == firebase_rtdb_download_status_complete)
+  {
+    Serial.println("Download completed\n");
+  }
+  else if (info.status == firebase_rtdb_download_status_error)
+  {
+    Serial.printf("Download failed, %s\n", info.errorMsg.c_str());
+  }
+}
+
+// The Firebase upload callback function
+void rtdbUploadCallback(RTDB_UploadStatusInfo info)
+{
+  if (info.status == firebase_rtdb_upload_status_init)
+  {
+    Serial.printf("Uploading file %s (%d) to %s\n", info.localFileName.c_str(), info.size, info.remotePath.c_str());
+  }
+  else if (info.status == firebase_rtdb_upload_status_upload)
+  {
+    Serial.printf("Uploaded %d%s\n", (int)info.progress, "%");
+  }
+  else if (info.status == firebase_rtdb_upload_status_complete)
+  {
+    Serial.println("Upload completed\n");
+  }
+  else if (info.status == firebase_rtdb_upload_status_error)
+  {
+    Serial.printf("Upload failed, %s\n", info.errorMsg.c_str());
+  }
+}
+
 void loop()
 {
+
+  // Firebase.ready() should be called repeatedly to handle authentication tasks.
+
   if (Firebase.ready() && !taskCompleted)
   {
     taskCompleted = true;
 
-    //File name must be in 8.3 DOS format (max. 8 bytes file name and 3 bytes file extension)
-    Serial.printf("Set file... %s\n", Firebase.setFile(fbdo, StorageType::FLASH, "test/file/data", "/file1.txt") ? "ok" : fbdo.errorReason().c_str());
+    // File name must be in 8.3 DOS format (max. 8 bytes file name and 3 bytes file extension)
+    Serial.println("\nSet file...");
+    if (!Firebase.setFile(fbdo, StorageType::FLASH, "test/file/data", "/file1.txt", rtdbUploadCallback /* callback function*/))
+      Serial.println(fbdo.errorReason());
 
-    Serial.printf("Get file... %s\n", Firebase.getFile(fbdo, StorageType::FLASH, "test/file/data", "/file2.txt") ? "ok" : fbdo.errorReason().c_str());
+    Serial.println("\nGet file...");
+    if (!Firebase.getFile(fbdo, StorageType::FLASH, "test/file/data", "/file2.txt", rtdbDownloadCallback /* callback function*/))
+      Serial.println(fbdo.errorReason());
 
     if (fbdo.httpCode() == FIREBASE_ERROR_HTTP_CODE_OK)
     {
-
-      //Readout the downloaded file
+      // Readout the downloaded file
       file = DEFAULT_FLASH_FS.open("/file2.txt", "r");
       int i = 0;
 

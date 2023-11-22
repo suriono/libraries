@@ -1,19 +1,19 @@
 /**
- * FireSense v1.0.5
+ * FireSense v1.0.15
  *
  * The Programmable Data Logging and IO Control library.
  *
  * This library required FirebaseESP32 or FirebaseESP8266 or Firebase ESP Client to be installed.
  *
- * This library supports Espressif ESP8266 and ESP32
+ * This library supports Espressif ESP8266, ESP32 and RP2040 Pico
  *
- * Created July 4, 2021
+ * Created September 10, 2023
  *
  * This work is a part of Firebase ESP Client library
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
+ * Copyright (c) 2023 K. Suwatchai (Mobizt)
  *
  * The MIT License (MIT)
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
+ * Copyright (c) 2023 K. Suwatchai (Mobizt)
  *
  *
  * Permission is hereby granted, free of charge, to any person returning a copy
@@ -39,29 +39,17 @@
  * WHETHER
  * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
+ */
+#include <Arduino.h>
+#include "mbfs/MB_MCU.h"
 #include "FirebaseFS.h"
 
-#ifdef ENABLE_RTDB
+#if defined(ENABLE_RTDB) || defined(FIREBASE_ENABLE_RTDB)
 
 #ifndef FireSenseClass_H
 #define FireSenseClass_H
-#include <Arduino.h>
 
-#if defined(ESP32)
-#if defined(FIREBASE_ESP32_CLIENT)
-#include <FirebaseESP32.h>
-#endif
-#elif defined(ESP8266)
-#if defined(FIREBASE_ESP8266_CLIENT)
-#include <FirebaseESP8266.h>
-#endif
-#endif
-
-#if defined(FIREBASE_ESP_CLIENT)
-#include <Firebase_ESP_Client.h>
-#endif
+#include <Firebase.h>
 
 #ifndef FIREBASE_STREAM_CLASS
 #if defined(FIREBASE_ESP_CLIENT)
@@ -71,10 +59,22 @@
 #endif
 #endif
 
-class MillisTimer
+#if defined(FIREBASE_ESP32_CLIENT) || defined(FIREBASE_ESP8266_CLIENT)
+#define FBRTDB Firebase
+#define EXT *
+#define EXT2 
+#elif defined(FIREBASE_ESP_CLIENT)
+#define FBRTDB Firebase.RTDB
+#define EXT
+#define EXT2 &
+#endif
+
+using namespace mb_string;
+
+class MB_MillisTimer
 {
 public:
-    MillisTimer(){};
+    MB_MillisTimer(){};
 
     void setTo(uint32_t timeout)
     {
@@ -115,8 +115,13 @@ private:
     uint32_t tmo = 0;
 };
 
+#if defined(__AVR__)
+typedef void (*FireSense_Function)(const char *);
+typedef void (*callback_function_t)(void);
+#else
 typedef struct std::function<void(const char *)> FireSense_Function;
 typedef std::function<void(void)> callback_function_t;
+#endif
 
 class FireSenseClass
 {
@@ -216,190 +221,213 @@ public:
     FireSenseClass(const FireSenseClass &other);
 
     /** Initiate the FireSense Class.
-     * 
+     *
      * @param config The pointer to Firesense_Config data.
      * @param databaseSecret The database secret.
-     * 
+     *
      * @return Boolean value, indicates the success of the operation.
-     * 
+     *
      * @note Due to query index need to be assign to the database rules, the admin rights access is needed
      * The database secret can be empty string if the sign-in sign-in method is OAuth2.0.
-    */
+     */
     bool begin(struct firesense_config_t *config, const char *databaseSecret);
 
-    /** Load the device configurations.
-     * 
+    /** Load the device configurations (deprecated).
+     *
      * @param defaultDataLoadCallback The callback function that called when no config found in the database.
-     * 
+     *
      * @note The callback function should add the channals or conditions manually or load from the device storage.
-    */
+     *
+     * Due to limited stack memory (4 kB) in ESP8266, this function can cause the stack overflow and should not use.
+     *
+     * Use the loadConfig function without callback instead.
+     */
     void loadConfig(callback_function_t defaultDataLoadCallback);
 
+    /** Load the device configurations and return false when no config loaded.
+     *
+     * @return boolean status of operation.
+     *
+     * @note The function returns false when no config found in database and the default config loading function should be called.
+     *
+     * After the default config loaded, the function updateConfig should be called.
+     */
+    bool loadConfig();
+
+    /** Update the config after loaded.
+     */
+    void updateConfig();
+
     /** Save the current config to the device storage.
-     * 
+     *
      * @param filename The file path includes its name of file that will be saved.
      * @param storageType The enum of memory storage type e.g. mem_storage_type_flash and mem_storage_type_sd. The file systems can be changed in FirebaseFS.h.
-     * 
+     *
      * @return Boolean value, indicates the success of the operation.
-     * 
-    */
-    bool backupConfig(const String &filename, fb_esp_mem_storage_type storageType);
+     *
+     */
+    bool backupConfig(const String &filename, firebase_mem_storage_type storageType);
 
     /** Read the config from the device storage.
-     * 
+     *
      * @param filename The file path includes its name of file that will be read.
      * @param storageType The enum of memory storage type e.g. mem_storage_type_flash and mem_storage_type_sd. The file systems can be changed in FirebaseFS.h.
-     * 
+     *
      * @return Boolean value, indicates the success of the operation.
-     * 
-    */
-    bool restoreConfig(const String &filename, fb_esp_mem_storage_type storageType);
+     *
+     */
+    bool restoreConfig(const String &filename, firebase_mem_storage_type storageType);
 
     /** Enable (run) or disable (stop) the conditions checking tasks.
-     * 
+     *
      * @param enable The boolean value to enable/disable.
-     * 
-    */
+     *
+     */
     void enableController(bool enable);
 
     /** Add a channel to device config.
-     * 
+     *
      * @param channel The FireSense_Channel data to add.
      * @param addToDatabase The boolean option, set to true to add the data to database.
-     * 
-    */
+     *
+     */
     void addChannel(struct channel_info_t &channel, bool addToDatabase = true);
 
     /** Add a condition to device config.
-     * 
+     *
      * @param cond The FireSense_Condition data to add.
      * @param addToDatabase The boolean option, set to true to add the data to database.
-     * 
+     *
      * The format of conditions (IF) and its expression.
-     * 
+     *
      * CONDITION1 + && or || LOGICAL OPERATOR + CONDITION2 + LOGICAL OPERATOR + CONDITION3 +...
-     * 
+     *
      * The condition checking and expression evaluation are from left to right
-     * 
-     * 
+     *
+     *
      * The valid left, right operands and syntaxes are
-     * 
+     *
      * Operand and Syntaxes                                  Usages
-     * 
-     * <channel id>                                         LED1 == false && STATUS == LED1             
+     *
+     * <channel id>                                         LED1 == false && STATUS == LED1
      * values e.g. boolean, integer and float               HUMID1 > 70 || LAMP1 == false
      * millis                                               millis > 200000 + VALUE1
      * micros                                               VALUE1 < micros - 1000000
      * time e.g. hour:min:sec                               time > 12:00:00 && time < 15:30:00
-     * date e.g. month/day/year where month start with 0    date == 5/28/2021
+     * date e.g. month/day/year where month start with 0    date == 5/28/2022
      * weekday e.g. 1 for monday and 7 for sunday           weekday == 5
      * day e.g. 1 to 31                                     day > 24
      * month e.g. 0 to 11                                   month < 11
-     * year e.g. 2021                                       year == 2021
+     * year e.g. 2022                                       year == 2022
      * hour e.g. 0 to 23                                    hour == 18
      * min  e.g. 0 to 59                                    min == 30
      * sec  e.g. 0 to 59                                    sec == 20
      * change e.g the value of channel changed              change(VALUE1)
      * ! e.g. the opposite of expresion result              !LED1 || !(time > 15:20:06)
-     * 
-     * 
+     *
+     *
      * The format of statements (THEN and ELSE) and its expression.
-     * 
+     *
      * STATEMENT1 + COMMA + STATEMENT2 +...
-     * 
+     *
      * The statement processing and expression evaluation are from left to right.
-     * 
+     *
      * The valid left, right operands and syntaxes are
-     * 
+     *
      * Operand and Syntaxes                                  Usages
-     * 
-     * <channel id>                                         LED1 = false, STATUS = 5 * 10             
+     *
+     * <channel id>                                         LED1 = false, STATUS = 5 * 10
      * values e.g. boolean, integer and float               HUMID1 = 70
      * millis                                               VALUE1 += millis
      * micros                                               VALUE1 *= micros
      * delay                                                delay(1000), LED1 = true
      *                                                      ;do non-blocking delay until timed out and set LED1 to true
-     * 
+     *
      * func  e.g. func(x,y,z)                               func(0,10,'hello world')
      * where x is the index of callback function added      ;send the hello world text 10 times to function with index 0
      * with FireSense.addCallbackFunction
-     * y is the number of iteration that function will be 
+     * y is the number of iteration that function will be
      * called as long as the conditions is true
-     * z is the message payload sent to the callback. 
+     * z is the message payload sent to the callback.
      * The content of payload other than alphabet (A-Z, a-z
-     * and 1-9) should be in ''. 
-     * 
-     * Use {CHANNEL_ID} to insert the channel value into 
+     * and 1-9) should be in ''.
+     *
+     * Use {CHANNEL_ID} to insert the channel value into
      * the text payload.
-     * 
+     *
      * The supported assignment operators are
      * +=, -=, *=, /=, &=, |=
-     * 
-     * 
+     *
+     *
      * The supported comparision operators are
      * ==, !=, >, <, >=, <=
-     * 
-    */
+     *
+     */
     void addCondition(struct firesense_condition_t cond, bool addToDatabase = true);
 
     /** Add a callback function used with func syntax in the conditions.
-     * 
+     *
      * @param func The FireSense_Function callback.
-     * 
-    */
+     *
+     */
     void addCallbackFunction(FireSense_Function func);
 
     /** Clear all callback functions used with func syntax in the conditions.
-     * 
-    */
+     *
+     */
     void clearAllCallbackFunctions();
 
     /** Add a pointer of uint8_t (byte) variable that bind to the channels.
-     * 
+     *
      * @param value The uint8_t variable.
-     * 
-    */
+     *
+     */
     void addUserValue(uint8_t *value);
 
     /** Add a pointer of bool variable that bind to the channel.
-     * 
+     *
      * @param value The bool variable.
-     * 
-    */
+     *
+     */
     void addUserValue(bool *value);
 
     /** Add a pointer of int variable that bind to the channel.
-     * 
+     *
      * @param value The int variable.
-     * 
-    */
+     *
+     */
     void addUserValue(int *value);
 
     /** Add a pointer of float variable that bind to the channel.
-     * 
+     *
      * @param value The float variable.
-     * 
-    */
+     *
+     */
     void addUserValue(float *value);
 
     /** Clear all user variable pointers that bound to the channels.
-     * 
-    */
+     *
+     */
     void clearAllUserValues();
 
     /** Get the devivce id string.
-     * 
+     *
      * @return The unique id String of device.
-     * 
-    */
+     *
+     */
     String getDeviceId();
+
+    /** Run the schedule tasks.
+     *
+     */
+    void run();
 
     void readStream(FIREBASE_STREAM_CLASS *data);
     void readStream(FirebaseData *fbdo);
     bool configExisted();
 
 private:
-    //condition's group comparison operator type
+    // condition's group comparison operator type
     enum next_comp_opr_t
     {
         next_comp_opr_none = -1,
@@ -431,7 +459,7 @@ private:
         assignment_operator_type_logic_or
     };
 
-    //condition's operand type
+    // condition's operand type
     enum cond_operand_type_t
     {
         cond_operand_type_undefined = -1,
@@ -451,7 +479,7 @@ private:
         cond_operand_type_expression,
     };
 
-    //expression's operand type
+    // expression's operand type
     enum expr_operand_type_t
     {
         expr_operand_type_undefined = -1,
@@ -461,7 +489,7 @@ private:
         expr_operand_type_micros
     };
 
-    //conddition's comparision operator type
+    // conddition's comparision operator type
     enum cond_comp_opr_type_t
     {
         cond_comp_opr_type_undefined,
@@ -473,7 +501,7 @@ private:
         cond_comp_opr_type_neq
     };
 
-    //statement's operand type
+    // statement's operand type
     enum stm_operand_type_t
     {
         stm_operand_type_undefined = -1,
@@ -483,7 +511,7 @@ private:
         stm_operand_type_expression
     };
 
-    //expression item data
+    // expression item data
     struct expr_item_data_t
     {
         expr_operand_type_t type = expr_operand_type_undefined;
@@ -500,16 +528,16 @@ private:
         struct data_value_info_t result;
         bool not_op = false;
         assignment_operator_type_t next_ass_opr = assignment_operator_type_undefined;
-        std::vector<struct expression_item_info_t> list = std::vector<struct expression_item_info_t>();
+        MB_VECTOR<struct expression_item_info_t> list;
     };
 
     struct expressions_info_t
     {
-        std::vector<struct expression_item_info_t> expressions = std::vector<struct expression_item_info_t>();
+        MB_VECTOR<struct expression_item_info_t> expressions;
         struct data_value_info_t result;
     };
 
-    //condition's left operand
+    // condition's left operand
     struct cond_left_oprand_item_t
     {
         struct expressions_info_t exprs;
@@ -519,7 +547,7 @@ private:
         struct tm time;
     };
 
-    //condition's right operand
+    // condition's right operand
     struct cond_right_oprand_item_t
     {
         struct expressions_info_t exprs;
@@ -528,7 +556,7 @@ private:
         bool not_op = false;
     };
 
-    //condition item data
+    // condition item data
     struct cond_item_data_t
     {
         struct cond_left_oprand_item_t left;
@@ -540,7 +568,7 @@ private:
     {
         FireSense_Function *ptr = nullptr;
         int numArg = 0;
-        std::string payload;
+        MB_String payload;
         int iteration_max = 1;
         int iteration_count = 0;
     };
@@ -551,7 +579,7 @@ private:
         struct channel_info_t *channel = nullptr;
         struct function_info_t function;
         int tmo = -1;
-        MillisTimer timer;
+        MB_MillisTimer timer;
     };
 
     struct stm_right_operand_item_t
@@ -570,14 +598,14 @@ private:
 
     struct condition_item_info_t
     {
-        //std::string raw;
+        // MB_String raw;
         struct cond_item_data_t data;
         bool is_nested = false;
         int depth = 0;
         bool result = false;
         bool not_op = false;
         next_comp_opr_t next_comp_opr = next_comp_opr_none;
-        std::vector<struct condition_item_info_t> list = std::vector<struct condition_item_info_t>();
+        MB_VECTOR<struct condition_item_info_t> list;
     };
 
     struct expression_group_item_t
@@ -594,25 +622,22 @@ private:
 
     struct conditions_info_t
     {
-        std::vector<struct condition_item_info_t> conditions = std::vector<struct condition_item_info_t>();
-        std::vector<struct statement_item_info_t> thenStatements = std::vector<struct statement_item_info_t>();
-        std::vector<struct statement_item_info_t> elseStatements = std::vector<struct statement_item_info_t>();
+        MB_VECTOR<struct condition_item_info_t> conditions = MB_VECTOR<struct condition_item_info_t>();
+        MB_VECTOR<struct statement_item_info_t> thenStatements = MB_VECTOR<struct statement_item_info_t>();
+        MB_VECTOR<struct statement_item_info_t> elseStatements = MB_VECTOR<struct statement_item_info_t>();
         bool result = false;
     };
 
-    std::vector<struct channel_info_t> channelsList = std::vector<struct channel_info_t>();
-    std::vector<struct data_value_pointer_info_t> userValueList = std::vector<struct data_value_pointer_info_t>();
-    std::vector<FireSense_Function> functionList = std::vector<FireSense_Function>();
-    std::vector<struct conditions_info_t> conditionsList = std::vector<struct conditions_info_t>();
-
-    const char *months[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    const char *sdow[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    const char letters[36] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
+    MB_VECTOR<struct channel_info_t> channelsList = MB_VECTOR<struct channel_info_t>();
+    MB_VECTOR<struct data_value_pointer_info_t> userValueList = MB_VECTOR<struct data_value_pointer_info_t>();
+    MB_VECTOR<FireSense_Function> functionList = MB_VECTOR<FireSense_Function>();
+    MB_VECTOR<struct conditions_info_t> conditionsList = MB_VECTOR<struct conditions_info_t>();
 
     struct firesense_config_t *config;
-    callback_function_t _callback_function = nullptr;
+
+    callback_function_t _callback_function = NULL;
     FirebaseJson _json;
-    FirebaseJsonData _jdat;
+    FirebaseJsonData result;
 
     bool timeReady = false;
     bool initializing = false;
@@ -630,35 +655,34 @@ private:
 
     callback_function_t defaultDataLoadCallback = NULL;
 
-    std::string streamCmd;
+    MB_String streamCmd;
     unsigned long lastSeenMillis = 0;
     unsigned long logMillis = 0;
     unsigned long conditionMillis = 0;
     unsigned long authen_check_millis = 0;
-    time_t minTs = ESP_DEFAULT_TS;
+    time_t minTs = FIREBASE_DEFAULT_TS;
     uint64_t maxTs = 32503654800;
-    std::string deviceId;
+    MB_String deviceId;
 
-    std::string controlPath();
-    std::string channelControlPath();
-    std::string configPath();
-    std::string conditionPath();
-    std::string channelConfigPath();
-    std::string streamCmdPath();
-    std::string statusPath();
-    std::string terminalPath();
-    std::string channelStatusPath();
-    std::string lastSeenPath();
-    std::string logPath();
-    bool int_begin();
-    void int_loadConfig();
+    MB_String controlPath();
+    MB_String channelControlPath();
+    MB_String configPath();
+    MB_String conditionPath();
+    MB_String channelConfigPath();
+    MB_String streamCmdPath();
+    MB_String statusPath();
+    MB_String terminalPath();
+    MB_String channelStatusPath();
+    MB_String lastSeenPath();
+    MB_String logPath();
+    bool mBegin();
     void setLogQueryIndex();
     void addDBChannel(struct channel_info_t &channel);
     void updateDBStatus(struct channel_info_t &channel);
     void storeDBStatus();
-    void parseCondition(const char *src, std::vector<struct condition_item_info_t> &conditions, int depth = 0);
-    void parseExpression(const char *src, std::vector<struct expression_item_info_t> &expressions, int depth = 0);
-    void parseStatement(const char *src, std::vector<struct statement_item_info_t> &stm);
+    void parseCondition(const char *src, MB_VECTOR<struct condition_item_info_t> &conditions, int depth = 0);
+    void parseExpression(const char *src, MB_VECTOR<struct expression_item_info_t> &expressions, int depth = 0);
+    void parseStatement(const char *src, MB_VECTOR<struct statement_item_info_t> &stm);
     int getCompareConditionType(const char c);
     int getAssignOprType(const char c);
     void loadConditionsList();
@@ -689,22 +713,79 @@ private:
     void getExpression(const char *s, struct expr_item_data_t &data);
     void getStatement(const char *src, struct stm_item_t &data);
     void parseDateTime(const char *str, int type, struct tm &out);
-    void getConditionItem(struct cond_item_data_t &data, std::string &left, std::string &right);
-    void replaceAll(std::string &str, const char *find, const char *replace);
-    void replaceChannelsValues(std::string &str);
-    void trim(const char *s, std::string &d, bool isExpression, const char beginTrim = '(', const char endTrim = ')');
-    void split(std::vector<std::string> &out, const char *str, const char delim, const char beginEsc = 0, const char endEsc = 0);
-    std::string getChipId();
-    std::string randomUid(uint8_t length);
-    std::string getDateTimeString();
+    void getConditionItem(struct cond_item_data_t &data, MB_String &left, MB_String &right);
+    void replaceAll(MB_String &str, const char *find, const char *replace);
+    void replaceChannelsValues(MB_String &str);
+    void trim(const char *s, MB_String &d, bool isExpression, const char beginTrim = '(', const char endTrim = ')');
+    void split(MB_VECTOR<MB_String> &out, const char *str, const char delim, const char beginEsc = 0, const char endEsc = 0);
+    void getChipId(String &s);
+    void randomUid(uint8_t length, String &s);
+    void getDateTimeString(MB_String &s);
     void setupStream();
-    void run();
-    void int_run();
+    void mRun();
     void printError(FirebaseData *fbdo);
     void printUpdate(const char *msg, int type, float value = 0);
     void pauseStream();
     void unpauseStream();
     void copyConstructor(const FireSenseClass &other);
+
+    const char *months(int index)
+    {
+        switch (index)
+        {
+        case 0:
+            return (const char *)FPSTR("Jan");
+        case 1:
+            return (const char *)FPSTR("Feb");
+        case 2:
+            return (const char *)FPSTR("Mar");
+        case 3:
+            return (const char *)FPSTR("Apr");
+        case 4:
+            return (const char *)FPSTR("May");
+        case 5:
+            return (const char *)FPSTR("Jun");
+        case 6:
+            return (const char *)FPSTR("Jul");
+        case 7:
+            return (const char *)FPSTR("Aug");
+        case 8:
+            return (const char *)FPSTR("Sep");
+        case 9:
+            return (const char *)FPSTR("Oct");
+        case 10:
+            return (const char *)FPSTR("Nov");
+        case 11:
+            return (const char *)FPSTR("Dec");
+
+        default:
+            return (const char *)FPSTR("Dec");
+        }
+    }
+
+    const char *sdow(int index)
+    {
+        switch (index)
+        {
+        case 0:
+            return (const char *)FPSTR("Sun");
+        case 1:
+            return (const char *)FPSTR("Mon");
+        case 2:
+            return (const char *)FPSTR("Tue");
+        case 3:
+            return (const char *)FPSTR("Wed");
+        case 4:
+            return (const char *)FPSTR("Thu");
+        case 5:
+            return (const char *)FPSTR("Fri");
+        case 6:
+            return (const char *)FPSTR("Sat");
+
+        default:
+            return (const char *)FPSTR("Sat");
+        }
+    }
 
 #if defined(ESP8266)
     void set_scheduled_callback(callback_function_t callback);
@@ -721,71 +802,6 @@ typedef enum FireSenseClass::channel_type_t Firesense_Channel_Type;
 typedef struct FireSenseClass::firesense_condition_t FireSense_Condition;
 typedef struct FireSenseClass::firesense_config_t Firesense_Config;
 typedef enum FireSenseClass::firesense_data_type_t FireSense_Data_Type;
-
-struct firesense_token_t
-{
-    static constexpr const char *esp = "ESP-";
-    static constexpr const char *ping = "ping";
-    static constexpr const char *reply = "Reply ";
-    static constexpr const char *millis = "millis";
-    static constexpr const char *micros = "micros";
-    static constexpr const char *date = "date";
-    static constexpr const char *time = "time";
-    static constexpr const char *day = "day";
-    static constexpr const char *weekday = "weekday";
-    static constexpr const char *month = "month";
-    static constexpr const char *year = "year";
-    static constexpr const char *hour = "hour";
-    static constexpr const char *min = "min";
-    static constexpr const char *sec = "sec";
-    static constexpr const char *id = "id";
-    static constexpr const char *uid = "uid";
-    static constexpr const char *name = "name";
-    static constexpr const char *location = "location";
-    static constexpr const char *utype = "utype";
-    static constexpr const char *gpio = "gpio";
-    static constexpr const char *type = "type";
-    static constexpr const char *vIndex = "vIndex";
-    static constexpr const char *status = "status";
-    static constexpr const char *log = "log";
-    static constexpr const char *Idle = "Idle";
-    static constexpr const char *Ready = "Ready";
-    static constexpr const char *config = "config";
-    static constexpr const char *condition = "condition";
-    static constexpr const char *run = "run";
-    static constexpr const char *stop = "stop";
-    static constexpr const char *store = "store";
-    static constexpr const char *restore = "restore";
-    static constexpr const char *clear = "clear";
-    static constexpr const char *restart = "restart";
-    static constexpr const char *n1 = "\\n";
-    static constexpr const char *n2 = "\n";
-    static constexpr const char *slash = "/";
-    static constexpr const char *ntp1 = "pool.ntp.org";
-    static constexpr const char *ntp2 = "time.nist.gov";
-    static constexpr const char *d_integer = "int";
-    static constexpr const char *d_float = "float";
-    static constexpr const char *s_if = "if";
-    static constexpr const char *s_then = "then";
-    static constexpr const char *s_else = "else";
-    static constexpr const char *left_pr = "(";
-    static constexpr const char *right_pr = ")";
-    static constexpr const char *left_bk = "{";
-    static constexpr const char *right_bk = "}";
-    static constexpr const char *left_sb = "[";
-    static constexpr const char *right_sb = "]";
-    static constexpr const char *right_sb_bk = "]}";
-    static constexpr const char *dot = ".";
-    static constexpr const char *d_true = "true";
-    static constexpr const char *d_false = "false";
-    static constexpr const char *change = "change";
-    static constexpr const char *delay = "delay";
-    static constexpr const char *func = "func";
-    static constexpr const char *demo = "/demo";
-    static constexpr const char *dash = "-";
-    static constexpr const char *d_boolean = "boolean";
-    static constexpr const char *d_double = "double";
-};
 
 FireSenseClass::FireSenseClass()
 {
@@ -815,7 +831,7 @@ void FireSenseClass::copyConstructor(const FireSenseClass &other)
     config = new struct firesense_config_t();
     *config = *other.config;
     _callback_function = other._callback_function;
-    _jdat = other._jdat;
+    result = other.result;
     timeReady = other.timeReady;
     initializing = other.initializing;
     loadingConfig = other.loadingConfig;
@@ -843,8 +859,8 @@ void FireSenseClass::sendReadyStatus()
     if (!configReady())
         return;
 
-    Firebase.RTDB.setAsync(config->shared_fbdo, streamCmdPath().c_str(), firesense_token_t::Idle);
-    Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), firesense_token_t::Ready);
+    FBRTDB.setAsync(EXT config->shared_fbdo, streamCmdPath().c_str(), (const char *)FPSTR("Idle"));
+    FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), (const char *)FPSTR("Ready"));
 
     if (config->close_session)
         config->shared_fbdo->clear();
@@ -854,7 +870,7 @@ bool FireSenseClass::configExisted()
 {
     if (!configReady())
         return false;
-    config_existed = Firebase.RTDB.pathExisted(config->shared_fbdo, configPath().c_str());
+    config_existed = FBRTDB.pathExisted(EXT config->shared_fbdo, configPath().c_str());
 
     if (config->close_session)
         config->shared_fbdo->clear();
@@ -862,12 +878,12 @@ bool FireSenseClass::configExisted()
     return config_existed;
 }
 
-static void FiresenseStreamCB(FIREBASE_STREAM_CLASS data)
+__attribute__((__used__)) static void FiresenseStreamCB(FIREBASE_STREAM_CLASS data)
 {
     FireSense.readStream(&data);
 }
 
-static void FiresenseStreamToCB(bool timeout)
+__attribute__((__used__)) static void FiresenseStreamToCB(bool timeout)
 {
     if (timeout)
     {
@@ -887,18 +903,35 @@ bool FireSenseClass::begin(struct firesense_config_t *config, const char *databa
         return false;
     }
 
+#ifdef ESP32
+    if (!Firebase.ready())
+    {
+        printUpdate("", 44);
+        while (!Firebase.ready())
+        {
+            delay(0);
+        }
+    }
+#endif
+
     printUpdate("", 3);
 
     if (this->config->basePath == "")
-        this->config->basePath = firesense_token_t::demo;
+        this->config->basePath = (const char *)FPSTR("/demo");
 
     if (this->config->deviceId == "")
-        deviceId = getChipId();
+    {
+        String s;
+        getChipId(s);
+        deviceId = s.c_str();
+    }
     else
     {
         deviceId = this->config->deviceId.c_str();
-        deviceId += firesense_token_t::dash;
-        deviceId += getChipId();
+        deviceId += (const char *)FPSTR("-");
+        String s;
+        getChipId(s);
+        deviceId += s.c_str();
     }
 
     if (!config->shared_fbdo)
@@ -907,30 +940,25 @@ bool FireSenseClass::begin(struct firesense_config_t *config, const char *databa
         return false;
     }
 
-#ifdef ESP8266
     if (this->config->shared_fbdo)
-        this->config->shared_fbdo->setBSSLBufferSize(1024, 1024);
+        this->config->shared_fbdo->setBSSLBufferSize(2048, 512);
     if (this->config->stream_fbdo)
-        this->config->stream_fbdo->setBSSLBufferSize(1024, 1024);
-#endif
+        this->config->stream_fbdo->setBSSLBufferSize(2048, 512);
 
     this->config->shared_fbdo->setResponseSize(1024);
     if (this->config->stream_fbdo)
         this->config->stream_fbdo->setResponseSize(1024);
 
-    return int_begin();
+    return mBegin();
 }
 
-bool FireSenseClass::int_begin()
+bool FireSenseClass::mBegin()
 {
     if (initializing)
         return false;
 
     initializing = true;
     initReady = false;
-#if defined(ESP32)
-    Firebase.RTDB.allowMultipleRequests(true);
-#endif
 
     if (!Firebase.ready())
     {
@@ -939,7 +967,7 @@ bool FireSenseClass::int_begin()
         return false;
     }
 
-    if (time(nullptr) < minTs)
+    if (Firebase.getCurrentTime() < minTs)
     {
         printUpdate("", 14);
         setClock(config->time_zone, config->daylight_offset_in_sec);
@@ -982,13 +1010,13 @@ void FireSenseClass::setupStream()
 
     delay(0);
 
-    //No need to run stream check at this time
+    // No need to run stream check at this time
     pauseStream();
 
     printUpdate("", 19);
     if (config->stream_fbdo)
     {
-        if (!Firebase.RTDB.beginStream(config->stream_fbdo, controlPath().c_str()))
+        if (!FBRTDB.beginStream(EXT config->stream_fbdo, controlPath().c_str()))
             printError(config->stream_fbdo);
         else
             printUpdate("", 21);
@@ -996,14 +1024,15 @@ void FireSenseClass::setupStream()
     else
     {
 
-        if (!Firebase.RTDB.beginStream(config->shared_fbdo, controlPath().c_str()))
+        if (!FBRTDB.beginStream(EXT config->shared_fbdo, controlPath().c_str()))
             printError(config->stream_fbdo);
         else
             printUpdate("", 21);
     }
-
+#if defined(ESP32) || defined(ESP8266)
     if (config->stream_fbdo && !config->disable_command)
-        Firebase.RTDB.setStreamCallback(config->stream_fbdo, FiresenseStreamCB, FiresenseStreamToCB);
+        FBRTDB.setStreamCallback(EXT config->stream_fbdo, FiresenseStreamCB, FiresenseStreamToCB);
+#endif
 }
 
 void FireSenseClass::addCallbackFunction(FireSense_Function func)
@@ -1059,7 +1088,7 @@ void FireSenseClass::clearLog()
         return;
 
     printUpdate("", 22);
-    if (!Firebase.RTDB.deleteNode(config->shared_fbdo, logPath().c_str()))
+    if (!FBRTDB.deleteNode(EXT config->shared_fbdo, logPath().c_str()))
         printError(config->shared_fbdo);
 
     if (config->close_session)
@@ -1098,7 +1127,7 @@ void FireSenseClass::setChannalValueType()
         }
         else
         {
-            //The type of unbound variable channel
+            // The type of unbound variable channel
             channel->current_value.type = (data_type_t)channel->unbound_type;
             channel->last_value.type = (data_type_t)data_type_float;
         }
@@ -1107,7 +1136,7 @@ void FireSenseClass::setChannalValueType()
 
 void FireSenseClass::resetStatement(struct conditions_info_t *conditionsListItem, statement_type_t type)
 {
-    std::vector<statement_item_info_t> *stms = nullptr;
+    MB_VECTOR<statement_item_info_t> *stms = nullptr;
     if (type == statement_type_then)
         stms = &conditionsListItem->thenStatements;
     else if (type == statement_type_else)
@@ -1115,7 +1144,12 @@ void FireSenseClass::resetStatement(struct conditions_info_t *conditionsListItem
 
     for (size_t i = 0; i < stms->size(); i++)
     {
+
+#if defined(MB_USE_STD_VECTOR)
         statement_item_info_t *statement = &(*(stms->begin() + i));
+#else
+        statement_item_info_t *statement = &((*stms)[i]);
+#endif
 
         if (statement->data.left.type == stm_operand_type_delay)
         {
@@ -1172,7 +1206,7 @@ void FireSenseClass::executeStatement(struct conditions_info_t *conditionsListIt
         return;
 
     bool timerDone = false;
-    std::vector<statement_item_info_t> *stms = nullptr;
+    MB_VECTOR<statement_item_info_t> *stms = nullptr;
     if (type == statement_type_then)
         stms = &conditionsListItem->thenStatements;
     else if (type == statement_type_else)
@@ -1184,7 +1218,12 @@ void FireSenseClass::executeStatement(struct conditions_info_t *conditionsListIt
             return;
 
         delay(0);
+
+#if defined(MB_USE_STD_VECTOR)
         statement_item_info_t *statement = &(*(stms->begin() + i));
+#else
+        statement_item_info_t *statement = &((*stms)[i]);
+#endif
         if (statement->data.left.type == stm_operand_type_delay)
         {
 
@@ -1215,13 +1254,13 @@ void FireSenseClass::executeStatement(struct conditions_info_t *conditionsListIt
 
             statement->data.left.function.iteration_count++;
 
-            //call user function
+            // call user function
             if (statement->data.left.function.ptr || statement->data.left.function.numArg > 0)
             {
                 statement->done = true;
-                std::string s = statement->data.left.function.payload;
+                MB_String s = statement->data.left.function.payload;
                 replaceChannelsValues(s);
-                replaceAll(s, firesense_token_t::n1, firesense_token_t::n2);
+                replaceAll(s, (const char *)FPSTR("\\n"), (const char *)FPSTR("\n"));
 
                 if (statement->data.left.function.ptr)
                     (*statement->data.left.function.ptr)(s.c_str());
@@ -1229,7 +1268,7 @@ void FireSenseClass::executeStatement(struct conditions_info_t *conditionsListIt
         }
         else if (statement->data.left.type == stm_operand_type_channel)
         {
-            //update channel value
+            // update channel value
             struct data_value_info_t rvalue;
 
             if (statement->data.right.type == stm_operand_type_channel)
@@ -1262,19 +1301,19 @@ void FireSenseClass::executeStatement(struct conditions_info_t *conditionsListIt
 
                     if (statement->data.left.channel->status)
                     {
-                        std::string path = channelStatusPath();
-                        path += firesense_token_t::slash;
+                        MB_String path = channelStatusPath();
+                        path += (const char *)FPSTR("/");
                         path += statement->data.left.channel->id.c_str();
 
                         printUpdate(statement->data.left.channel->id.c_str(), 0);
                         if (statement->data.left.channel->current_value.type == data_type_float)
                         {
-                            if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), statement->data.left.channel->current_value.float_data))
+                            if (!FBRTDB.setAsync(EXT config->shared_fbdo, path.c_str(), statement->data.left.channel->current_value.float_data))
                                 printError(config->shared_fbdo);
                         }
                         else
                         {
-                            if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), statement->data.left.channel->current_value.int_data))
+                            if (!FBRTDB.setAsync(EXT config->shared_fbdo, path.c_str(), statement->data.left.channel->current_value.int_data))
                                 printError(config->shared_fbdo);
                         }
 
@@ -1429,7 +1468,7 @@ void FireSenseClass::testConditionItem(struct condition_item_info_t *cond)
 
     if (cond->data.left.type == cond_operand_type_date || cond->data.left.type == cond_operand_type_time || cond->data.left.type == cond_operand_type_day || cond->data.left.type == cond_operand_type_weekday || cond->data.left.type == cond_operand_type_year || cond->data.left.type == cond_operand_type_month || cond->data.left.type == cond_operand_type_hour || cond->data.left.type == cond_operand_type_min || cond->data.left.type == cond_operand_type_sec)
     {
-        time_t current_ts = time(nullptr);
+        time_t current_ts = Firebase.getCurrentTime();
         time_t target_ts = 0;
         struct tm current_timeinfo;
         localtime_r(&current_ts, &current_timeinfo);
@@ -1445,6 +1484,8 @@ void FireSenseClass::testConditionItem(struct condition_item_info_t *cond)
             {
                 target_ts = cond->data.left.time.tm_wday;
                 current_ts = current_timeinfo.tm_wday;
+                if (current_ts == 0)
+                    current_ts = 7;
             }
             else if (cond->data.left.type == cond_operand_type_year)
             {
@@ -1692,7 +1733,7 @@ void FireSenseClass::evalExpressionsList(struct expressions_info_t *exprList)
     if (!Firebase.ready())
         return;
 
-    std::vector<struct expression_group_item_t> resList = std::vector<struct expression_group_item_t>();
+    MB_VECTOR<struct expression_group_item_t> resList;
 
     struct expression_group_item_t r;
 
@@ -1785,7 +1826,7 @@ void FireSenseClass::evalExpressionsItem(struct expression_item_info_t *expr)
     }
     else
     {
-        std::vector<struct expression_group_item_t> resList = std::vector<struct expression_group_item_t>();
+        MB_VECTOR<struct expression_group_item_t> resList;
 
         struct expression_group_item_t r;
 
@@ -1921,19 +1962,17 @@ void FireSenseClass::unpauseStream()
     }
 }
 
-void FireSenseClass::int_run()
+void FireSenseClass::mRun()
 {
+    delay(0);
     if (configReady())
     {
-        time_t now = time(nullptr);
+        time_t now = Firebase.getCurrentTime();
+
         timeReady = now > minTs && Firebase.ready();
 
         if (Firebase.ready())
         {
-            if (!initReady)
-                int_begin();
-            else if (!configLoadReady)
-                int_loadConfig();
 
             if (!config_existed && timeReady && initReady && configLoadReady && millis() - authen_check_millis > 10000)
             {
@@ -1946,13 +1985,14 @@ void FireSenseClass::int_run()
                 if (streamPause)
                     unpauseStream();
 
-#if defined(ESP8266)
+#if !defined(ESP32)
                 checkCommand();
 #endif
                 checkInput();
 
                 if (controllerEnable)
                 {
+
                     if (!conditionsLoaded)
                         loadConditionsList();
                     testConditionsList();
@@ -1970,13 +2010,16 @@ void FireSenseClass::int_run()
 
 void FireSenseClass::run()
 {
+    delay(0);
 
-#if defined(ESP32)
+#if defined(FB_ENABLE_EXTERNAL_CLIENT)
+    mRun();
+#elif defined(ESP32)
 
     if (firesense_run_task_handle)
         return;
 
-    int_run();
+    mRun();
 
     static FireSenseClass *_this = this;
 
@@ -1984,7 +2027,7 @@ void FireSenseClass::run()
     {
         for (;;)
         {
-            _this->int_run();
+            _this->mRun();
             yield();
             vTaskDelay(5 / portTICK_PERIOD_MS);
         }
@@ -1996,7 +2039,7 @@ void FireSenseClass::run()
     xTaskCreatePinnedToCore(taskCode, "firesense_run_task", 8192, NULL, 10, &firesense_run_task_handle, 1);
 
 #elif defined(ESP8266)
-    int_run();
+    mRun();
     set_scheduled_callback(std::bind(&FireSenseClass::run, this));
 #endif
 }
@@ -2006,8 +2049,10 @@ void FireSenseClass::restart()
     if (!configReady())
         return;
     if (config->debug)
-        Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), "restarting device...");
+        FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), "restarting device...");
+#if defined(ESP32) || defined(ESP8266)
     ESP.restart();
+#endif
 }
 
 void FireSenseClass::checkCommand()
@@ -2015,68 +2060,71 @@ void FireSenseClass::checkCommand()
     if (!configReady())
         return;
 
-    if (streamCmd.length() == 0 || streamCmd == firesense_token_t::Idle)
+    if (streamCmd.length() == 0 || streamCmd == (const char *)FPSTR("Idle"))
         return;
 
-    //get NTP time
-    if (streamCmd == firesense_token_t::time)
+    // get NTP time
+    if (streamCmd == (const char *)FPSTR("time"))
         setClock(config->time_zone, config->daylight_offset_in_sec);
-    else if (streamCmd.find("time ") != std::string::npos)
+    else if (streamCmd.find("time ") != MB_String::npos)
     {
-        //set system time with timestamp
+        // set system time with timestamp
         int t = atoi(streamCmd.substr(9).c_str());
         if (t > (int)minTs && t < (int)maxTs)
         {
             timeReady = false;
             Firebase.setSystemTime(t);
-            if (time(nullptr) > minTs && Firebase.ready())
+
+            if (Firebase.getCurrentTime() > minTs && Firebase.ready())
                 timeReady = true;
         }
     }
-    else if (streamCmd == firesense_token_t::config)
-        //load config
+    else if (streamCmd == (const char *)FPSTR("config"))
+        // load config
         configLoadReady = false;
-    else if (streamCmd == firesense_token_t::condition)
-        //load conditions
+    else if (streamCmd == (const char *)FPSTR("condition"))
+        // load conditions
         conditionsLoaded = false;
-    else if (streamCmd == firesense_token_t::run)
-        //run conditions test
+    else if (streamCmd == (const char *)FPSTR("run"))
+        // run conditions test
         controllerEnable = true;
-    else if (streamCmd == firesense_token_t::stop)
-        //stop conditions test
+    else if (streamCmd == (const char *)FPSTR("stop"))
+        // stop conditions test
         controllerEnable = false;
 
-    else if (streamCmd == firesense_token_t::store)
-        //store the channels status
+    else if (streamCmd == (const char *)FPSTR("store"))
+        // store the channels status
         storeDBStatus();
-    else if (streamCmd == firesense_token_t::restore)
-        //restore the channels status
+    else if (streamCmd == (const char *)FPSTR("restore"))
+        // restore the channels status
         loadStatus();
-    else if (streamCmd == firesense_token_t::clear)
-        //clear log
+    else if (streamCmd == (const char *)FPSTR("clear"))
+        // clear log
         clearLog();
-    else if (streamCmd == firesense_token_t::ping)
+    else if (streamCmd == (const char *)FPSTR("ping"))
     {
-        //ping back
-        std::string s = firesense_token_t::reply;
-        s += String(time(nullptr)).c_str();
-        Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), s.c_str());
+        // ping back
+        MB_String s = (const char *)FPSTR("reply");
+
+        s += (uint64_t)Firebase.getCurrentTime();
+
+        FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), s.c_str());
         if (config->close_session)
             config->shared_fbdo->clear();
     }
-    else if (streamCmd == firesense_token_t::restart)
-        //restart device
+    else if (streamCmd == (const char *)FPSTR("restart"))
+        // restart device
         restart();
 
     else if (config->debug)
     {
-        Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), "Unknown command!");
+        FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), "Unknown command!");
 
         if (config->close_session)
             config->shared_fbdo->clear();
     }
 
-    Firebase.RTDB.setAsync(config->shared_fbdo, streamCmdPath().c_str(), firesense_token_t::Idle);
+    FBRTDB.setAsync(EXT config->shared_fbdo, streamCmdPath().c_str(), (const char *)FPSTR("Idle"));
     if (config->close_session)
         config->shared_fbdo->clear();
     streamCmd.clear();
@@ -2121,15 +2169,17 @@ void FireSenseClass::sendLog()
         if (logEnable)
         {
             printUpdate("", 20);
-            if (!Firebase.RTDB.deleteNodesByTimestamp(config->shared_fbdo, logPath().c_str(), firesense_token_t::time, config->max_node_to_delete, config->dataRetainingPeriod))
+            if (!FBRTDB.deleteNodesByTimestamp(EXT config->shared_fbdo, logPath().c_str(), (const char *)FPSTR("time"), config->max_node_to_delete, config->dataRetainingPeriod))
                 printError(config->shared_fbdo);
 
             if (config->close_session)
                 config->shared_fbdo->clear();
 
             _json.clear();
-            time_t ts = time(nullptr);
-            String t = String(ts);
+            time_t ts = 0;
+
+            ts = Firebase.getCurrentTime();
+
             size_t count = 0;
             for (size_t i = 0; i < channelsList.size(); i++)
             {
@@ -2146,13 +2196,13 @@ void FireSenseClass::sendLog()
 
             if (count > 0)
             {
-                _json.add(firesense_token_t::time, (int)ts);
-                std::string path = logPath();
-                path += firesense_token_t::slash;
-                path += t.c_str();
+                _json.add((const char *)FPSTR("time"), (int)ts);
+                MB_String path = logPath();
+                path += (const char *)FPSTR("/");
+                path += (uint64_t)ts;
 
                 printUpdate("", 1);
-                if (!Firebase.RTDB.updateNodeSilentAsync(config->shared_fbdo, path.c_str(), &_json))
+                if (!FBRTDB.updateNode(EXT config->shared_fbdo, path.c_str(), EXT2 _json))
                     printError(config->shared_fbdo);
 
                 if (config->close_session)
@@ -2175,10 +2225,14 @@ void FireSenseClass::sendLastSeen()
         if (timeReady)
         {
             _json.clear();
-            _json.add(firesense_token_t::date, getDateTimeString().c_str());
-            _json.add("ts", (int)time(nullptr));
+            MB_String s;
+            getDateTimeString(s);
+            _json.add((const char *)FPSTR("date"), s.c_str());
+
+            _json.add((const char *)FPSTR("ts"), (uint64_t)Firebase.getCurrentTime());
+
             printUpdate("", 2);
-            if (!Firebase.RTDB.updateNodeSilentAsync(config->shared_fbdo, lastSeenPath().c_str(), &_json))
+            if (!FBRTDB.updateNode(EXT config->shared_fbdo, lastSeenPath().c_str(), EXT2 _json))
                 printError(config->shared_fbdo);
 
             if (config->close_session)
@@ -2199,75 +2253,96 @@ bool FireSenseClass::configReady()
     return true;
 }
 
-void FireSenseClass::int_loadConfig()
+void dummy()
 {
-    loadConfig(defaultDataLoadCallback);
 }
 
 void FireSenseClass::loadConfig(callback_function_t defaultDataLoadCallback)
 {
-    this->defaultDataLoadCallback = defaultDataLoadCallback;
+    Serial.println("******************************************************************************");
+    Serial.println("**** This function was deprecated, please check the new examples updates. *****");
+    Serial.println("******************************************************************************");
 
+    this->defaultDataLoadCallback = defaultDataLoadCallback;
+    loadConfig();
+}
+
+void FireSenseClass::updateConfig()
+{
+    printUpdate("", 23);
+    setChannalValueType();
+    loadStatus();
+    conditionsLoaded = true;
+    loadingConfig = false;
+    printUpdate("", 24);
+    configLoadReady = true;
+    run();
+}
+
+bool FireSenseClass::loadConfig()
+{
     if (!configReady() || !Firebase.ready() || !Firebase.authenticated())
     {
         run();
-        return;
+        return true;
     }
 
     if (loadingConfig)
-        return;
+        return false;
 
     loadingConfig = true;
 
-    if (!configExisted() && defaultDataLoadCallback)
+    if (!configExisted())
     {
-
-        printUpdate("", 23);
-        defaultDataLoadCallback();
-        setChannalValueType();
-        loadStatus();
-        conditionsLoaded = true;
+        if (defaultDataLoadCallback)
+        {
+            printUpdate("", 23);
+            defaultDataLoadCallback();
+            setChannalValueType();
+            loadStatus();
+            conditionsLoaded = true;
+            loadingConfig = false;
+            printUpdate("", 24);
+            configLoadReady = true;
+            run();
+            return true;
+        }
         loadingConfig = false;
-        printUpdate("", 24);
-
-        configLoadReady = true;
-        run();
-        return;
+        return false;
     }
 
     if (!Firebase.authenticated())
     {
         loadingConfig = false;
-        return;
+        return false;
     }
 
     printUpdate("", 25);
 
     if (config->debug)
-        Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), "Loading database config...");
+        FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), "Loading database config...");
 
-    if (!Firebase.RTDB.getShallowData(config->shared_fbdo, channelConfigPath().c_str()))
+    if (!FBRTDB.getShallowData(EXT config->shared_fbdo, channelConfigPath().c_str()))
     {
         loadingConfig = false;
         printUpdate("", 26);
 
         if (config->close_session)
             config->shared_fbdo->clear();
-        return;
+        return false;
     }
 
-    FirebaseJson *js = config->shared_fbdo->jsonObjectPtr();
-    std::vector<String> channelIdxs = std::vector<String>();
+    FirebaseJson *js = config->shared_fbdo->to<FirebaseJson *>();
+    MB_VECTOR<String> channelIdxs;
 
     if (js)
     {
         size_t len = js->iteratorBegin();
-        String key, value = "";
-        int type = 0;
+        FirebaseJson::IteratorValue value;
         for (size_t i = 0; i < len; i++)
         {
-            js->iteratorGet(i, type, key, value);
-            channelIdxs.push_back(key);
+            value = js->valueAt(i);
+            channelIdxs.push_back(value.key);
         }
         js->iteratorEnd();
     }
@@ -2276,43 +2351,43 @@ void FireSenseClass::loadConfig(callback_function_t defaultDataLoadCallback)
 
     for (size_t i = 0; i < channelIdxs.size(); i++)
     {
-        std::string path = channelConfigPath();
-        path += firesense_token_t::slash;
+        MB_String path = channelConfigPath();
+        path += (const char *)FPSTR("/");
         path += channelIdxs[i].c_str();
         printUpdate("", 27);
-        if (!Firebase.RTDB.get(config->shared_fbdo, path.c_str()))
+        if (!FBRTDB.get(EXT config->shared_fbdo, path.c_str()))
         {
             printError(config->shared_fbdo);
             loadingConfig = false;
 
             if (config->close_session)
                 config->shared_fbdo->clear();
-            return;
+            return false;
         }
 
         struct channel_info_t channel;
 
-        FirebaseJson *json = config->shared_fbdo->jsonObjectPtr();
-        json->get(_jdat, firesense_token_t::id);
-        channel.id = _jdat.stringValue;
-        json->get(_jdat, firesense_token_t::uid);
-        channel.uid = _jdat.stringValue;
-        json->get(_jdat, firesense_token_t::name);
-        channel.name = _jdat.stringValue;
-        json->get(_jdat, firesense_token_t::location);
-        channel.location = _jdat.stringValue;
-        json->get(_jdat, firesense_token_t::gpio);
-        channel.gpio = _jdat.intValue;
-        json->get(_jdat, firesense_token_t::type);
-        channel.type = _jdat.intValue;
-        json->get(_jdat, firesense_token_t::utype);
-        channel.unbound_type = (firesense_data_type_t)_jdat.intValue;
-        json->get(_jdat, firesense_token_t::vIndex);
-        channel.value_index = _jdat.intValue;
-        json->get(_jdat, firesense_token_t::status);
-        channel.status = _jdat.boolValue;
-        json->get(_jdat, firesense_token_t::log);
-        channel.log = _jdat.boolValue;
+        FirebaseJson *json = config->shared_fbdo->to<FirebaseJson *>();
+        json->get(result, (const char *)FPSTR("id"));
+        channel.id = result.to<String>();
+        json->get(result, (const char *)FPSTR("uid"));
+        channel.uid = result.to<String>();
+        json->get(result, (const char *)FPSTR("name"));
+        channel.name = result.to<String>();
+        json->get(result, (const char *)FPSTR("location"));
+        channel.location = result.to<String>();
+        json->get(result, (const char *)FPSTR("gpio"));
+        channel.gpio = result.to<int>();
+        json->get(result, (const char *)FPSTR("type"));
+        channel.type = result.to<int>();
+        json->get(result, (const char *)FPSTR("utype"));
+        channel.unbound_type = (firesense_data_type_t)result.to<int>();
+        json->get(result, (const char *)FPSTR("vIndex"));
+        channel.value_index = result.to<int>();
+        json->get(result, (const char *)FPSTR("status"));
+        channel.status = result.to<bool>();
+        json->get(result, (const char *)FPSTR("log"));
+        channel.log = result.to<bool>();
         delay(0);
 
         if (config->close_session)
@@ -2331,9 +2406,11 @@ void FireSenseClass::loadConfig(callback_function_t defaultDataLoadCallback)
     loadingConfig = false;
     configLoadReady = true;
     run();
+
+    return true;
 }
 
-bool FireSenseClass::backupConfig(const String &filename, fb_esp_mem_storage_type storageType)
+bool FireSenseClass::backupConfig(const String &filename, firebase_mem_storage_type storageType)
 {
     if (!configReady())
         return false;
@@ -2343,7 +2420,7 @@ bool FireSenseClass::backupConfig(const String &filename, fb_esp_mem_storage_typ
 
     printUpdate("", 40);
     delay(0);
-    if (!Firebase.RTDB.backup(config->shared_fbdo, storageType, configPath().c_str(), filename.c_str()))
+    if (!FBRTDB.backup(EXT config->shared_fbdo, storageType, configPath().c_str(), filename.c_str()))
     {
         printError(config->shared_fbdo);
 
@@ -2354,7 +2431,7 @@ bool FireSenseClass::backupConfig(const String &filename, fb_esp_mem_storage_typ
     return true;
 }
 
-bool FireSenseClass::restoreConfig(const String &filename, fb_esp_mem_storage_type storageType)
+bool FireSenseClass::restoreConfig(const String &filename, firebase_mem_storage_type storageType)
 {
     if (!configReady())
         return false;
@@ -2364,7 +2441,7 @@ bool FireSenseClass::restoreConfig(const String &filename, fb_esp_mem_storage_ty
 
     delay(0);
     printUpdate("", 41);
-    if (!Firebase.RTDB.restore(config->shared_fbdo, storageType, configPath().c_str(), filename.c_str()))
+    if (!FBRTDB.restore(EXT config->shared_fbdo, storageType, configPath().c_str(), filename.c_str()))
     {
         printError(config->shared_fbdo);
 
@@ -2383,30 +2460,34 @@ void FireSenseClass::setClock(float time_zone, float daylight_offset_in_sec)
     if (loadingConfig || loadingCondition || loadingStatus || sendingLog)
         return;
 
-    time_t now = time(nullptr);
+    time_t now = Firebase.getCurrentTime();
     timeReady = now > minTs && Firebase.ready();
-
+#if defined(ESP32) || defined(ESP8266)
     if (now < minTs)
-        configTime(time_zone * 3600, config->daylight_offset_in_sec, firesense_token_t::ntp1, firesense_token_t::ntp2, NULL);
+        configTime(time_zone * 3600, config->daylight_offset_in_sec, (const char *)FPSTR("pool.ntp.org"), (const char *)FPSTR("time.nist.gov"), NULL);
+#endif
+    now = Firebase.getCurrentTime();
 
-    now = time(nullptr);
     timeReady = now > minTs && Firebase.ready();
 
     if (timeReady)
     {
         _json.clear();
-        _json.add(firesense_token_t::date, getDateTimeString().c_str());
-        _json.add("ts", (int)time(nullptr));
+        MB_String s;
+        getDateTimeString(s);
+        _json.add((const char *)FPSTR("date"), s.c_str());
+
+        _json.add((const char *)FPSTR("ts"), (uint64_t)Firebase.getCurrentTime());
 
         printUpdate("", 2);
-        if (!Firebase.RTDB.updateNodeSilentAsync(config->shared_fbdo, lastSeenPath().c_str(), &_json) || !Firebase.RTDB.set(config->shared_fbdo, terminalPath().c_str(), (int)now))
+        if (!FBRTDB.updateNode(EXT config->shared_fbdo, lastSeenPath().c_str(), EXT2 _json) || !FBRTDB.set(EXT config->shared_fbdo, terminalPath().c_str(), (int)now))
             printError(config->shared_fbdo);
         _json.clear();
     }
     else
     {
         if (config->debug)
-            Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), "Acquiring NTP time...");
+            FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), "Acquiring NTP time...");
     }
 
     if (config->close_session)
@@ -2443,26 +2524,26 @@ void FireSenseClass::addCondition(struct firesense_condition_t cond, bool addToD
     {
         _json.clear();
         if (cond.IF.length() > 0)
-            _json.add(firesense_token_t::s_if, cond.IF);
+            _json.add((const char *)FPSTR("if"), cond.IF);
         if (cond.THEN.length() > 0)
-            _json.add(firesense_token_t::s_then, cond.THEN);
+            _json.add((const char *)FPSTR("then"), cond.THEN);
         if (cond.ELSE.length() > 0)
-            _json.add(firesense_token_t::s_else, cond.ELSE);
-        std::string path = conditionPath();
-        path += firesense_token_t::slash;
+            _json.add((const char *)FPSTR("else"), cond.ELSE);
+        MB_String path = conditionPath();
+        path += (const char *)FPSTR("/");
         path += String(conditionsList.size() - 1).c_str();
         delay(0);
 
         printUpdate("", 31);
-        if (!Firebase.RTDB.updateNodeSilentAsync(config->shared_fbdo, path.c_str(), &_json))
+        if (!FBRTDB.updateNode(EXT config->shared_fbdo, path.c_str(), EXT2 _json))
             printError(config->shared_fbdo);
 
         if (config->close_session)
             config->shared_fbdo->clear();
 
-        cond.IF.clear();
-        cond.THEN.clear();
-        cond.ELSE.clear();
+        cond.IF.remove(1, cond.IF.length());
+        cond.THEN.remove(1, cond.THEN.length());
+        cond.ELSE.remove(1, cond.ELSE.length());
     }
 }
 
@@ -2481,10 +2562,10 @@ void FireSenseClass::loadConditionsList()
     conditionsList.clear();
 
     if (config->debug)
-        Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), "Loading conditions...");
+        FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), "Loading conditions...");
 
     printUpdate("", 42);
-    if (!Firebase.RTDB.getShallowData(config->shared_fbdo, conditionPath().c_str()))
+    if (!FBRTDB.getShallowData(EXT config->shared_fbdo, conditionPath().c_str()))
     {
         printError(config->shared_fbdo);
         loadingCondition = false;
@@ -2494,18 +2575,17 @@ void FireSenseClass::loadConditionsList()
         return;
     }
 
-    FirebaseJson *js = config->shared_fbdo->jsonObjectPtr();
-    std::vector<String> conditionIds = std::vector<String>();
+    FirebaseJson *js = config->shared_fbdo->to<FirebaseJson *>();
+    MB_VECTOR<String> conditionIds;
 
     if (js)
     {
         size_t len = js->iteratorBegin();
-        String key, value = "";
-        int type = 0;
+        FirebaseJson::IteratorValue value;
         for (size_t i = 0; i < len; i++)
         {
-            js->iteratorGet(i, type, key, value);
-            conditionIds.push_back(key);
+            value = js->valueAt(i);
+            conditionIds.push_back(value.key);
         }
         js->iteratorEnd();
     }
@@ -2520,12 +2600,12 @@ void FireSenseClass::loadConditionsList()
 
     for (size_t i = 0; i < conditionIds.size(); i++)
     {
-        std::string path = conditionPath();
-        path += firesense_token_t::slash;
+        MB_String path = conditionPath();
+        path += (const char *)FPSTR("/");
         path += conditionIds[i].c_str();
 
         printUpdate(String(i).c_str(), 34);
-        if (!Firebase.RTDB.get(config->shared_fbdo, path.c_str()))
+        if (!FBRTDB.get(EXT config->shared_fbdo, path.c_str()))
         {
             printError(config->shared_fbdo);
 
@@ -2536,13 +2616,13 @@ void FireSenseClass::loadConditionsList()
         }
 
         struct firesense_condition_t cond;
-        FirebaseJson *json = config->shared_fbdo->jsonObjectPtr();
-        json->get(_jdat, firesense_token_t::s_if);
-        cond.IF = _jdat.stringValue;
-        json->get(_jdat, firesense_token_t::s_then);
-        cond.THEN = _jdat.stringValue;
-        json->get(_jdat, firesense_token_t::s_else);
-        cond.ELSE = _jdat.stringValue;
+        FirebaseJson *json = config->shared_fbdo->to<FirebaseJson *>();
+        json->get(result, (const char *)FPSTR("if"));
+        cond.IF = result.to<String>();
+        json->get(result, (const char *)FPSTR("then"));
+        cond.THEN = result.to<String>();
+        json->get(result, (const char *)FPSTR("else"));
+        cond.ELSE = result.to<String>();
 
         if (config->close_session)
             config->shared_fbdo->clear();
@@ -2731,7 +2811,12 @@ void FireSenseClass::printUpdate(const char *msg, int type, float value)
         break;
     case 43:
         Serial.print(F("[DEBUG] Free Heap "));
+#if defined(ESP32) || defined(ESP8266)
         Serial.println(ESP.getFreeHeap());
+#endif
+        break;
+    case 44:
+        Serial.println(F("[DEBUG] Waiting for authentication to be completed..."));
         break;
     default:
         break;
@@ -2764,8 +2849,8 @@ void FireSenseClass::setChannelValue(struct channel_info_t &channel, struct data
             channel.lastPolling = millis();
         }
 
-        std::string path = channelStatusPath();
-        path += firesense_token_t::slash;
+        MB_String path = channelStatusPath();
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
 
         if (!channel.ready)
@@ -2793,7 +2878,7 @@ void FireSenseClass::setChannelValue(struct channel_info_t &channel, struct data
             if (channel.status)
             {
                 printUpdate(channel.id.c_str(), 0);
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), channel.current_value.int_data > 0))
+                if (!FBRTDB.setAsync(EXT config->shared_fbdo, path.c_str(), channel.current_value.int_data > 0))
                     printError(config->shared_fbdo);
 
                 if (config->close_session)
@@ -2814,7 +2899,7 @@ void FireSenseClass::setChannelValue(struct channel_info_t &channel, struct data
             if (channel.status)
             {
                 printUpdate(channel.id.c_str(), 0);
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), v))
+                if (!FBRTDB.setAsync(EXT config->shared_fbdo, path.c_str(), v))
                     printError(config->shared_fbdo);
 
                 if (config->close_session)
@@ -2834,7 +2919,7 @@ void FireSenseClass::setChannelValue(struct channel_info_t &channel, struct data
             if (channel.status)
             {
                 printUpdate(channel.id.c_str(), 0);
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), v))
+                if (!FBRTDB.setAsync(EXT config->shared_fbdo, path.c_str(), v))
                     printError(config->shared_fbdo);
 
                 if (config->close_session)
@@ -2904,18 +2989,18 @@ void FireSenseClass::setUserValue(struct channel_info_t *channel, bool fromUserV
 
         if (channel->status)
         {
-            std::string path = channelStatusPath();
-            path += firesense_token_t::slash;
+            MB_String path = channelStatusPath();
+            path += (const char *)FPSTR("/");
             path += channel->id.c_str();
             printUpdate(channel->id.c_str(), 0);
             if (val.type == data_type_float)
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), val.float_data))
+                if (!FBRTDB.setAsync(EXT config->shared_fbdo, path.c_str(), val.float_data))
                     printError(config->shared_fbdo);
             }
             else
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), val.int_data))
+                if (!FBRTDB.setAsync(EXT config->shared_fbdo, path.c_str(), val.int_data))
                     printError(config->shared_fbdo);
             }
 
@@ -2938,39 +3023,39 @@ void FireSenseClass::loadStatus()
     printUpdate("", 6);
 
     if (config->debug)
-        Firebase.RTDB.setAsync(config->shared_fbdo, terminalPath().c_str(), "Loading channels status...");
+        FBRTDB.setAsync(EXT config->shared_fbdo, terminalPath().c_str(), "Loading channels status...");
 
-    if (Firebase.RTDB.getJSON(config->shared_fbdo, channelStatusPath().c_str()))
+    if (FBRTDB.getJSON(EXT config->shared_fbdo, channelStatusPath().c_str()))
     {
 
-        FirebaseJson *json = config->shared_fbdo->jsonObjectPtr();
+        FirebaseJson *json = config->shared_fbdo->to<FirebaseJson *>();
 
         for (size_t i = 0; i < channelsList.size(); i++)
         {
-            //Parse for each channel state
-            json->get(_jdat, channelsList[i].id);
+            // Parse for each channel state
+            json->get(result, channelsList[i].id);
 
-            if (_jdat.success)
+            if (result.success)
             {
                 channel_info_t *channel = &channelsList[i];
 
                 if (channel->type == channel_type_t::Output)
                 {
-                    digitalWrite(channel->gpio, _jdat.boolValue);
-                    channel->current_value.int_data = _jdat.boolValue;
+                    digitalWrite(channel->gpio, result.to<bool>());
+                    channel->current_value.int_data = result.to<bool>();
                 }
                 else if (channel->type == channel_type_t::Value)
                 {
                     struct data_value_info_t v;
                     v.type = channel->current_value.type;
-                    if (_jdat.type == firesense_token_t::d_float || _jdat.type == firesense_token_t::d_double)
+                    if (result.type == (const char *)FPSTR("float") || result.type == (const char *)FPSTR("double"))
                     {
-                        v.float_data = _jdat.floatValue;
+                        v.float_data = result.to<float>();
                         v.int_data = (int)v.float_data;
                     }
-                    else if (_jdat.type == firesense_token_t::d_boolean || _jdat.type == firesense_token_t::d_integer)
+                    else if (result.type == (const char *)FPSTR("boolean") || result.type == (const char *)FPSTR("int"))
                     {
-                        v.int_data = _jdat.intValue;
+                        v.int_data = result.to<int>();
                         v.float_data = (float)v.int_data;
                     }
                     setUserValue(channel, false, v);
@@ -2997,7 +3082,7 @@ void FireSenseClass::readStream(FIREBASE_STREAM_CLASS *data)
     if (!configReady())
         return;
 
-    if (data->dataType() == firesense_token_t::d_integer || data->dataType() == firesense_token_t::d_boolean || data->dataType() == firesense_token_t::d_float || data->dataType() == firesense_token_t::d_double)
+    if (data->dataType() == (const char *)FPSTR("int") || data->dataType() == (const char *)FPSTR("boolean") || data->dataType() == (const char *)FPSTR("float") || data->dataType() == (const char *)FPSTR("double"))
     {
         for (size_t i = 0; i < channelsList.size(); i++)
         {
@@ -3011,26 +3096,26 @@ void FireSenseClass::readStream(FIREBASE_STREAM_CLASS *data)
                     if (channelsList[i].type == channel_type_t::Output)
                     {
                         struct data_value_info_t v;
-                        if (data->dataType() == firesense_token_t::d_integer || data->dataType() == firesense_token_t::d_boolean)
+                        if (data->dataType() == (const char *)FPSTR("int") || data->dataType() == (const char *)FPSTR("boolean"))
                         {
-                            v.int_data = data->intData();
+                            v.int_data = data->to<int>();
                             v.type = data_type_int;
                             v.float_data = (float)v.int_data;
                             setChannelValue(channelsList[i], v);
                         }
                     }
-                    else if (data->dataType() == firesense_token_t::d_boolean || data->dataType() == firesense_token_t::d_integer || data->dataType() == firesense_token_t::d_float || data->dataType() == firesense_token_t::d_double)
+                    else if (data->dataType() == (const char *)FPSTR("boolean") || data->dataType() == (const char *)FPSTR("int") || data->dataType() == (const char *)FPSTR("float") || data->dataType() == (const char *)FPSTR("double"))
                     {
                         struct data_value_info_t v;
-                        if (data->dataType() == firesense_token_t::d_float || data->dataType() == firesense_token_t::d_double)
+                        if (data->dataType() == (const char *)FPSTR("float") || data->dataType() == (const char *)FPSTR("double"))
                         {
-                            v.float_data = data->floatData();
+                            v.float_data = data->to<float>();
                             v.type = data_type_float;
                             v.int_data = (int)v.float_data;
                         }
                         else
                         {
-                            v.int_data = data->intData();
+                            v.int_data = data->to<int>();
                             v.type = data_type_int;
                             v.float_data = (float)v.int_data;
                         }
@@ -3042,7 +3127,7 @@ void FireSenseClass::readStream(FIREBASE_STREAM_CLASS *data)
     }
     else if (data->dataPath() == "/cmd")
     {
-        streamCmd = data->stringData().c_str();
+        streamCmd = data->to<const char *>();
 #if defined(ESP32)
         checkCommand();
 #endif
@@ -3054,11 +3139,11 @@ void FireSenseClass::readStream(FirebaseData *fbdo)
     if (!configReady())
         return;
 
-    Firebase.RTDB.readStream(fbdo);
+    FBRTDB.readStream(EXT fbdo);
 
     if (fbdo->streamAvailable())
     {
-        if (fbdo->dataType() == firesense_token_t::d_integer || fbdo->dataType() == firesense_token_t::d_boolean || fbdo->dataType() == firesense_token_t::d_float || fbdo->dataType() == firesense_token_t::d_double)
+        if (fbdo->dataType() == (const char *)FPSTR("int") || fbdo->dataType() == (const char *)FPSTR("boolean") || fbdo->dataType() == (const char *)FPSTR("float") || fbdo->dataType() == (const char *)FPSTR("double"))
         {
             for (size_t i = 0; i < channelsList.size(); i++)
             {
@@ -3072,26 +3157,26 @@ void FireSenseClass::readStream(FirebaseData *fbdo)
                         if (channelsList[i].type == channel_type_t::Output)
                         {
                             struct data_value_info_t v;
-                            if (fbdo->dataType() == firesense_token_t::d_integer || fbdo->dataType() == firesense_token_t::d_boolean)
+                            if (fbdo->dataType() == (const char *)FPSTR("int") || fbdo->dataType() == (const char *)FPSTR("boolean"))
                             {
-                                v.int_data = fbdo->intData();
+                                v.int_data = fbdo->to<int>();
                                 v.type = data_type_int;
                                 v.float_data = (float)v.int_data;
                                 setChannelValue(channelsList[i], v);
                             }
                         }
-                        else if (fbdo->dataType() == firesense_token_t::d_boolean || fbdo->dataType() == firesense_token_t::d_integer || fbdo->dataType() == firesense_token_t::d_float || fbdo->dataType() == firesense_token_t::d_double)
+                        else if (fbdo->dataType() == (const char *)FPSTR("boolean") || fbdo->dataType() == (const char *)FPSTR("int") || fbdo->dataType() == (const char *)FPSTR("float") || fbdo->dataType() == (const char *)FPSTR("double"))
                         {
                             struct data_value_info_t v;
-                            if (fbdo->dataType() == firesense_token_t::d_float || fbdo->dataType() == firesense_token_t::d_double)
+                            if (fbdo->dataType() == (const char *)FPSTR("float") || fbdo->dataType() == (const char *)FPSTR("double"))
                             {
-                                v.float_data = fbdo->floatData();
+                                v.float_data = fbdo->to<float>();
                                 v.type = data_type_float;
                                 v.int_data = (int)v.float_data;
                             }
                             else
                             {
-                                v.int_data = fbdo->intData();
+                                v.int_data = fbdo->to<int>();
                                 v.type = data_type_int;
                                 v.float_data = (float)v.int_data;
                             }
@@ -3103,7 +3188,7 @@ void FireSenseClass::readStream(FirebaseData *fbdo)
         }
         else if (fbdo->dataPath() == "/cmd")
         {
-            streamCmd = fbdo->stringData().c_str();
+            streamCmd = fbdo->to<const char *>();
 #if defined(ESP32)
             checkCommand();
 #endif
@@ -3116,7 +3201,7 @@ void FireSenseClass::addChannel(struct channel_info_t &channel, bool addToDataba
     if (!configReady())
         return;
     printUpdate(channel.id.c_str(), 39);
-    channel.uid = randomUid(10).c_str();
+    randomUid(10, channel.uid);
 
     if (channel.type == channel_type_t::Analog_input || channel.type == channel_type_t::Input)
     {
@@ -3141,22 +3226,22 @@ void FireSenseClass::addDBChannel(struct channel_info_t &channel)
 
     printUpdate("", 8);
     delay(0);
-    std::string path;
+    MB_String path;
     _json.clear();
-    _json.add(firesense_token_t::id, channel.id);
-    _json.add(firesense_token_t::name, channel.name);
-    _json.add(firesense_token_t::location, channel.location);
-    _json.add(firesense_token_t::uid, channel.uid);
-    _json.add(firesense_token_t::gpio, channel.gpio);
-    _json.add(firesense_token_t::type, channel.type);
-    _json.add(firesense_token_t::utype, (int)channel.unbound_type);
-    _json.add(firesense_token_t::vIndex, channel.value_index);
-    _json.add(firesense_token_t::status, channel.status);
-    _json.add(firesense_token_t::log, channel.log);
+    _json.add((const char *)FPSTR("id"), channel.id);
+    _json.add((const char *)FPSTR("name"), channel.name);
+    _json.add((const char *)FPSTR("location"), channel.location);
+    _json.add((const char *)FPSTR("uid"), channel.uid);
+    _json.add((const char *)FPSTR("gpio"), channel.gpio);
+    _json.add((const char *)FPSTR("type"), channel.type);
+    _json.add((const char *)FPSTR("utype"), (int)channel.unbound_type);
+    _json.add((const char *)FPSTR("vIndex"), channel.value_index);
+    _json.add((const char *)FPSTR("status"), channel.status);
+    _json.add((const char *)FPSTR("log"), channel.log);
     path = channelConfigPath();
-    path += firesense_token_t::slash;
-    path += String(channelsList.size() - 1).c_str();
-    if (!Firebase.RTDB.updateNodeSilentAsync(config->shared_fbdo, path.c_str(), &_json))
+    path += (const char *)FPSTR("/");
+    path += channelsList.size() - 1;
+    if (!FBRTDB.updateNode(EXT config->shared_fbdo, path.c_str(), EXT2 _json))
     {
         printError(config->shared_fbdo);
 
@@ -3177,19 +3262,20 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
 
     printUpdate("", 11);
 
-    std::string path;
+    MB_String path;
 
     if (channel.type == channel_type_t::Output)
     {
         path = channelStatusPath();
-        path += firesense_token_t::slash;
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
         if (channel.status)
         {
             printUpdate(channel.id.c_str(), 0);
             if (channel.current_value.type == data_type_float)
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), channel.current_value.float_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), channel.current_value.float_data))
                 {
                     printError(config->shared_fbdo);
 
@@ -3200,7 +3286,8 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
             }
             else
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), channel.current_value.int_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), channel.current_value.int_data))
                 {
                     printError(config->shared_fbdo);
 
@@ -3212,20 +3299,23 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
         }
 
         path = channelControlPath();
-        path += firesense_token_t::slash;
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
-
-        Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), 0);
+        delay(0);
+        FBRTDB.set(EXT config->shared_fbdo, path.c_str(), 0);
     }
     else if (channel.type == channel_type_t::Input)
     {
+        /*
         path = channelControlPath();
-        path += firesense_token_t::slash;
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
-        Firebase.RTDB.deleteNode(config->shared_fbdo, path.c_str());
+        delay(0);
+        FBRTDB.deleteNode(config->shared_fbdo, path.c_str());
+        */
 
         path = channelStatusPath();
-        path += firesense_token_t::slash;
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
         if (channel.status)
         {
@@ -3233,7 +3323,8 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
 
             if (channel.current_value.type == data_type_float)
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), channel.current_value.float_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), channel.current_value.float_data))
                 {
                     printError(config->shared_fbdo);
 
@@ -3244,7 +3335,8 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
             }
             else
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), channel.current_value.int_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), channel.current_value.int_data))
                 {
                     printError(config->shared_fbdo);
                     return;
@@ -3254,13 +3346,16 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
     }
     else if (channel.type == channel_type_t::Analog_input)
     {
+        /*
         path = channelControlPath();
-        path += firesense_token_t::slash;
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
-        Firebase.RTDB.deleteNode(config->shared_fbdo, path.c_str());
+        delay(0);
+        FBRTDB.deleteNode(config->shared_fbdo, path.c_str());
+        */
 
         path = channelStatusPath();
-        path += firesense_token_t::slash;
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
         if (channel.status)
         {
@@ -3268,12 +3363,14 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
 
             if (channel.current_value.type == data_type_float)
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), channel.current_value.float_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), channel.current_value.float_data))
                     printError(config->shared_fbdo);
             }
             else
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), channel.current_value.int_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), channel.current_value.int_data))
                     printError(config->shared_fbdo);
             }
         }
@@ -3281,14 +3378,15 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
     else if (channel.type == channel_type_t::Value)
     {
         path = channelControlPath();
-        path += firesense_token_t::slash;
+        path += (const char *)FPSTR("/");
         path += channel.id.c_str();
-        Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), 0);
+        delay(0);
+        FBRTDB.set(EXT config->shared_fbdo, path.c_str(), 0);
 
         if ((int)userValueList.size() > channel.value_index && channel.value_index > -1 && channel.status)
         {
             path = channelStatusPath();
-            path += firesense_token_t::slash;
+            path += (const char *)FPSTR("/");
             path += channel.id.c_str();
             struct data_value_info_t val;
             if (channel.value_index != -1 && channel.value_index < (int)userValueList.size())
@@ -3322,12 +3420,14 @@ void FireSenseClass::updateDBStatus(struct channel_info_t &channel)
             printUpdate(channel.id.c_str(), 0);
             if (val.type == data_type_float)
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), val.float_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), val.float_data))
                     printError(config->shared_fbdo);
             }
             else
             {
-                if (!Firebase.RTDB.setAsync(config->shared_fbdo, path.c_str(), val.int_data))
+                delay(0);
+                if (!FBRTDB.set(EXT config->shared_fbdo, path.c_str(), val.int_data))
                     printError(config->shared_fbdo);
             }
         }
@@ -3346,164 +3446,160 @@ void FireSenseClass::storeDBStatus()
         updateDBStatus(channelsList[i]);
 }
 
-std::string FireSenseClass::controlPath()
+MB_String FireSenseClass::controlPath()
 {
     if (!configReady())
         return "";
 
-    std::string s = config->basePath.c_str();
-    s += "/controls/";
+    MB_String s = config->basePath.c_str();
+    s += (const char *)FPSTR("/controls/");
     s += deviceId;
     return s;
 }
 
-std::string FireSenseClass::channelControlPath()
+MB_String FireSenseClass::channelControlPath()
 {
-    std::string s = controlPath();
-    s += "/channels";
+    MB_String s = controlPath();
+    s += (const char *)FPSTR("/channels");
     return s;
 }
 
-std::string FireSenseClass::configPath()
+MB_String FireSenseClass::configPath()
 {
     if (!configReady())
         return "";
 
-    std::string s = config->basePath.c_str();
-    s += "/config/devices/";
+    MB_String s = config->basePath.c_str();
+    s += (const char *)FPSTR("/config/devices/");
     s += deviceId;
     return s;
 }
 
-std::string FireSenseClass::conditionPath()
+MB_String FireSenseClass::conditionPath()
 {
-    std::string s = configPath();
-    s += "/conditions";
+    MB_String s = configPath();
+    s += (const char *)FPSTR("/conditions");
     return s;
 }
 
-std::string FireSenseClass::channelConfigPath()
+MB_String FireSenseClass::channelConfigPath()
 {
-    std::string s = configPath();
-    s += "/channels";
+    MB_String s = configPath();
+    s += (const char *)FPSTR("/channels");
     return s;
 }
 
-std::string FireSenseClass::streamCmdPath()
+MB_String FireSenseClass::streamCmdPath()
 {
-    std::string s = controlPath();
-    s += "/cmd";
+    MB_String s = controlPath();
+    s += (const char *)FPSTR("/cmd");
     return s;
 }
 
-std::string FireSenseClass::statusPath()
+MB_String FireSenseClass::statusPath()
 {
     if (!configReady())
         return "";
 
-    std::string s = config->basePath.c_str();
-    s += "/status/";
+    MB_String s = config->basePath.c_str();
+    s += (const char *)FPSTR("/status/");
     s += deviceId;
     return s;
 }
 
-std::string FireSenseClass::terminalPath()
+MB_String FireSenseClass::terminalPath()
 {
-    std::string s = statusPath();
-    s += "/terminal";
+    MB_String s = statusPath();
+    s += (const char *)FPSTR("/terminal");
     return s;
 }
 
-std::string FireSenseClass::channelStatusPath()
+MB_String FireSenseClass::channelStatusPath()
 {
-    std::string s = statusPath();
-    s += "/channels";
+    MB_String s = statusPath();
+    s += (const char *)FPSTR("/channels");
     return s;
 }
 
-std::string FireSenseClass::lastSeenPath()
+MB_String FireSenseClass::lastSeenPath()
 {
-    std::string s = statusPath();
-    s += "/lastSeen";
+    MB_String s = statusPath();
+    s += (const char *)FPSTR("/lastSeen");
     return s;
 }
 
-std::string FireSenseClass::logPath()
+MB_String FireSenseClass::logPath()
 {
     if (!configReady())
         return "";
 
-    std::string s = config->basePath.c_str();
-    s += "/log/";
+    MB_String s = config->basePath.c_str();
+    s += (const char *)FPSTR("/log/");
     s += deviceId;
     return s;
 }
 
 String FireSenseClass::getDeviceId()
 {
-    return getChipId().c_str();
+    String s;
+    getChipId(s);
+    return s;
 }
 
-std::string FireSenseClass::getChipId()
+void FireSenseClass::getChipId(String &s)
 {
 #if defined(ESP32)
     uint32_t chipId = 0;
     for (int i = 0; i < 17; i = i + 8)
         chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
-    String s = firesense_token_t::esp;
+    s = (const char *)FPSTR("ESP-");
     s += String(chipId, HEX);
     s.toUpperCase();
-    return s.c_str();
 #elif defined(ESP8266)
-    String s = firesense_token_t::esp;
+    s = (const char *)FPSTR("ESP-");
     s += String(ESP.getChipId(), HEX);
     s.toUpperCase();
-    return s.c_str();
 #endif
 }
 
-std::string FireSenseClass::randomUid(uint8_t length)
+void FireSenseClass::randomUid(uint8_t length, String &s)
 {
-    std::string s = "";
     for (uint8_t i = 0; i < length; i++)
-        s += letters[random(0, 36)];
-    return s;
+        s += (char)random(97, 122);
 }
 
-std::string FireSenseClass::getDateTimeString()
+void FireSenseClass::getDateTimeString(MB_String &s)
 {
     if (!configReady())
-        return "";
+        return;
 
     struct tm timeinfo;
-    time_t now = time(nullptr);
+    time_t now = Firebase.getCurrentTime();
+
     localtime_r(&now, &timeinfo);
 
-    String s;
+    s = sdow(timeinfo.tm_wday);
+    s += (const char *)FPSTR(", ");
+    s += timeinfo.tm_mday;
+    s += (const char *)FPSTR(" ");
+    s += months(timeinfo.tm_mon);
 
-    s = sdow[timeinfo.tm_wday];
+    s += (const char *)FPSTR(" ");
+    s += timeinfo.tm_year + 1900;
 
-    s += ", ";
-    s += String(timeinfo.tm_mday);
-    s += " ";
-    s += months[timeinfo.tm_mon];
-
-    s += " ";
-    s += String(timeinfo.tm_year + 1900);
-
-    s += " ";
+    s += (const char *)FPSTR(" ");
     if (timeinfo.tm_hour < 10)
-        s += "0";
-    s += String(timeinfo.tm_hour);
-    s += ":";
+        s += (const char *)FPSTR("0");
+    s += timeinfo.tm_hour;
+    s += (const char *)FPSTR(":");
     if (timeinfo.tm_min < 10)
-        s += "0";
-    s += String(timeinfo.tm_min);
+        s += (const char *)FPSTR("0");
+    s += timeinfo.tm_min;
 
-    s += ":";
+    s += (const char *)FPSTR(":");
     if (timeinfo.tm_sec < 10)
-        s += "0";
-    s += String(timeinfo.tm_sec);
+        s += (const char *)FPSTR("0");
+    s += timeinfo.tm_sec;
 
     int p = 1;
     if (config->time_zone < 0)
@@ -3511,25 +3607,23 @@ std::string FireSenseClass::getDateTimeString()
     int tz = config->time_zone;
     float dif = (p * (config->time_zone - tz)) * 60.0;
     if (config->time_zone < 0)
-        s += " -";
+        s += (const char *)FPSTR(" -");
     else
-        s += " +";
+        s += (const char *)FPSTR(" +");
 
     if (tz < 10)
-        s += "0";
-    s += String(tz);
+        s += (const char *)FPSTR("0");
+    s += tz;
 
     if (dif < 10)
-        s += "0";
-    s += String((int)dif);
-
-    return s.c_str();
+        s += (const char *)FPSTR("0");
+    s += (int)dif;
 }
 
-void FireSenseClass::replaceAll(std::string &str, const char *find, const char *replace)
+void FireSenseClass::replaceAll(MB_String &str, const char *find, const char *replace)
 {
     size_t pos = 0;
-    while ((pos = str.find(find, pos)) != std::string::npos)
+    while ((pos = str.find(find, pos)) != MB_String::npos)
     {
         str.erase(pos, strlen(find));
         str.insert(pos, replace);
@@ -3537,24 +3631,24 @@ void FireSenseClass::replaceAll(std::string &str, const char *find, const char *
     }
 }
 
-void FireSenseClass::replaceChannelsValues(std::string &str)
+void FireSenseClass::replaceChannelsValues(MB_String &str)
 {
     String s, t;
     for (size_t i = 0; i < channelsList.size(); i++)
     {
-        s = firesense_token_t::left_bk;
+        s = (const char *)FPSTR("{");
         s += channelsList[i].id.c_str();
-        s += firesense_token_t::right_bk;
+        s += (const char *)FPSTR("}");
         struct data_value_info_t val = getChannelValue(&channelsList[i]);
 
         if (val.type == data_type_float)
-            replaceAll(str, s.c_str(), String(val.float_data).c_str());
+            replaceAll(str, s.c_str(), num2Str(val.float_data, -1));
         else
-            replaceAll(str, s.c_str(), String(val.int_data).c_str());
+            replaceAll(str, s.c_str(), num2Str(val.int_data, -1));
     }
 }
 
-void FireSenseClass::trim(const char *s, std::string &d, bool isExpression, const char beginTrim, const char endTrim)
+void FireSenseClass::trim(const char *s, MB_String &d, bool isExpression, const char beginTrim, const char endTrim)
 {
     int p1 = -1, p2 = -1, p3 = -1, p4 = -1;
 
@@ -3609,7 +3703,7 @@ void FireSenseClass::trim(const char *s, std::string &d, bool isExpression, cons
         }
     }
 
-    for (size_t i = strlen(s) - 1; i >= 0; i--)
+    for (int i = (int)strlen(s) - 1; i >= 0; i--)
     {
         if (s[i] == ' ')
             continue;
@@ -3640,8 +3734,6 @@ void FireSenseClass::trim(const char *s, std::string &d, bool isExpression, cons
         p1 = p3;
         p2++;
     }
-
-    std::string tmp;
 
     int i = 0;
     while (i < p2 - p1 + 1)
@@ -3678,20 +3770,20 @@ void FireSenseClass::getCondition(const char *s, struct cond_item_data_t &data)
 
     cond_comp_opr_type_t comp_type = cond_comp_opr_type_undefined;
     int p1 = -1, p2 = -1;
-    std::string t, left, right;
+    MB_String t, left, right;
 
     if (strlen(s) > 7)
     {
         t = s;
-        if (t.substr(0, 6) == firesense_token_t::change)
+        if (t.substr(0, 6) == (const char *)FPSTR("change"))
         {
             left = s;
-            size_t p1 = left.find(firesense_token_t::left_pr, 6);
-            if (p1 != std::string::npos)
+            size_t p1 = left.find((const char *)FPSTR("("), 6);
+            if (p1 != MB_String::npos)
             {
                 p1++;
-                size_t p2 = left.find(firesense_token_t::right_pr, p1 + 1);
-                if (p2 != std::string::npos)
+                size_t p2 = left.find((const char *)FPSTR(")"), p1 + 1);
+                if (p2 != MB_String::npos)
                 {
                     trim(left.substr(p1, p2 - p1).c_str(), right, false);
                     for (size_t j = 0; j < channelsList.size(); j++)
@@ -3778,7 +3870,7 @@ void FireSenseClass::getCondition(const char *s, struct cond_item_data_t &data)
         if (comp_type != cond_comp_opr_type_undefined)
         {
             int i = 0;
-            std::string r, l;
+            MB_String r, l;
             while (i < p1)
             {
                 l += s[i];
@@ -3806,7 +3898,7 @@ void FireSenseClass::getCondition(const char *s, struct cond_item_data_t &data)
     }
 }
 
-void FireSenseClass::getConditionItem(struct cond_item_data_t &data, std::string &left, std::string &right)
+void FireSenseClass::getConditionItem(struct cond_item_data_t &data, MB_String &left, MB_String &right)
 {
     if (left.length() == 0)
         return;
@@ -3820,53 +3912,53 @@ void FireSenseClass::getConditionItem(struct cond_item_data_t &data, std::string
     if (data.left.not_op)
         left = left.substr(1, left.length() - 1);
 
-    if (left == firesense_token_t::millis)
+    if (left == (const char *)FPSTR("millis"))
         data.left.type = cond_operand_type_millis;
-    else if (left == firesense_token_t::micros)
+    else if (left == (const char *)FPSTR("micros"))
         data.left.type = cond_operand_type_micros;
-    else if (left == firesense_token_t::date || left == firesense_token_t::time || left == firesense_token_t::day || left == firesense_token_t::weekday || left == firesense_token_t::hour || left == firesense_token_t::hour || left == firesense_token_t::sec || left == firesense_token_t::year || left == firesense_token_t::month)
+    else if (left == (const char *)FPSTR("date") || left == (const char *)FPSTR("time") || left == (const char *)FPSTR("day") || left == (const char *)FPSTR("weekday") || left == (const char *)FPSTR("hour") || left == (const char *)FPSTR("hour") || left == (const char *)FPSTR("sec") || left == (const char *)FPSTR("year") || left == (const char *)FPSTR("month"))
     {
-        if (left == firesense_token_t::date)
+        if (left == (const char *)FPSTR("date"))
         {
             data.left.type = cond_operand_type_date;
             data.right.type = cond_operand_type_date;
         }
-        else if (left == firesense_token_t::time)
+        else if (left == (const char *)FPSTR("time"))
         {
             data.left.type = cond_operand_type_time;
             data.right.type = cond_operand_type_time;
         }
-        else if (left == firesense_token_t::year)
+        else if (left == (const char *)FPSTR("year"))
         {
             data.left.type = cond_operand_type_year;
             data.right.type = cond_operand_type_year;
         }
-        else if (left == firesense_token_t::month)
+        else if (left == (const char *)FPSTR("month"))
         {
             data.left.type = cond_operand_type_month;
             data.right.type = cond_operand_type_month;
         }
-        else if (left == firesense_token_t::day)
+        else if (left == (const char *)FPSTR("day"))
         {
             data.left.type = cond_operand_type_day;
             data.right.type = cond_operand_type_day;
         }
-        else if (left == firesense_token_t::weekday)
+        else if (left == (const char *)FPSTR("weekday"))
         {
             data.left.type = cond_operand_type_weekday;
             data.right.type = cond_operand_type_weekday;
         }
-        else if (left == firesense_token_t::hour)
+        else if (left == (const char *)FPSTR("hour"))
         {
             data.left.type = cond_operand_type_hour;
             data.right.type = cond_operand_type_hour;
         }
-        else if (left == firesense_token_t::hour)
+        else if (left == (const char *)FPSTR("hour"))
         {
             data.left.type = cond_operand_type_min;
             data.right.type = cond_operand_type_min;
         }
-        else if (left == firesense_token_t::sec)
+        else if (left == (const char *)FPSTR("sec"))
         {
             data.left.type = cond_operand_type_sec;
             data.right.type = cond_operand_type_sec;
@@ -3909,9 +4001,9 @@ void FireSenseClass::getConditionItem(struct cond_item_data_t &data, std::string
     if (data.right.not_op)
         right = right.substr(1, right.length() - 1);
 
-    if (right == firesense_token_t::millis)
+    if (right == (const char *)FPSTR("millis"))
         data.right.type = cond_operand_type_millis;
-    else if (right == firesense_token_t::micros)
+    else if (right == (const char *)FPSTR("micros"))
         data.right.type = cond_operand_type_micros;
     else
     {
@@ -3942,7 +4034,7 @@ void FireSenseClass::parseDateTime(const char *str, int type, struct tm &out)
     out.tm_mon = -1;
     out.tm_year = -1;
     out.tm_wday = -1;
-    std::vector<std::string> tmtk = std::vector<std::string>();
+    MB_VECTOR<MB_String> tmtk;
 
     if (type == cond_operand_type_day)
         out.tm_mday = atoi(str);
@@ -3996,7 +4088,7 @@ void FireSenseClass::parseDateTime(const char *str, int type, struct tm &out)
 
 void FireSenseClass::getExpression(const char *s, struct expr_item_data_t &data)
 {
-    std::string str = s;
+    MB_String str = s;
 
     if (strlen(s) > 0)
     {
@@ -4007,7 +4099,7 @@ void FireSenseClass::getExpression(const char *s, struct expr_item_data_t &data)
         }
     }
 
-    if (str == firesense_token_t::millis)
+    if (str == (const char *)FPSTR("millis"))
     {
         data.type = expr_operand_type_millis;
         data.value.type = data_type_int;
@@ -4015,7 +4107,7 @@ void FireSenseClass::getExpression(const char *s, struct expr_item_data_t &data)
         data.value.float_data = (float)data.value.int_data;
         return;
     }
-    else if (str == firesense_token_t::micros)
+    else if (str == (const char *)FPSTR("micros"))
     {
         data.type = expr_operand_type_micros;
         data.value.type = data_type_int;
@@ -4023,11 +4115,11 @@ void FireSenseClass::getExpression(const char *s, struct expr_item_data_t &data)
         data.value.float_data = (float)data.value.int_data;
         return;
     }
-    else if (str == firesense_token_t::d_true || str == firesense_token_t::d_false)
+    else if (str == (const char *)FPSTR("true") || str == (const char *)FPSTR("false"))
     {
         data.type = expr_operand_type_value;
         data.value.type = data_type_bool;
-        data.value.int_data = str == firesense_token_t::d_true ? 1 : 0;
+        data.value.int_data = str == (const char *)FPSTR("true") ? 1 : 0;
         data.value.float_data = (float)data.value.int_data;
         return;
     }
@@ -4046,7 +4138,7 @@ void FireSenseClass::getExpression(const char *s, struct expr_item_data_t &data)
     }
 
     data.type = expr_operand_type_value;
-    if (str.find(firesense_token_t::dot) != std::string::npos)
+    if (str.find((const char *)FPSTR(".")) != MB_String::npos)
     {
         data.value.type = data_type_float;
         data.value.float_data = atof(s);
@@ -4060,7 +4152,7 @@ void FireSenseClass::getExpression(const char *s, struct expr_item_data_t &data)
     }
 }
 
-void FireSenseClass::parseExpression(const char *src, std::vector<struct expression_item_info_t> &expressions, int depth)
+void FireSenseClass::parseExpression(const char *src, MB_VECTOR<struct expression_item_info_t> &expressions, int depth)
 {
     if (!Firebase.ready())
         return;
@@ -4069,7 +4161,7 @@ void FireSenseClass::parseExpression(const char *src, std::vector<struct express
     bool nested = false;
     int aType = assignment_operator_type_undefined;
 
-    std::string s, buf, t;
+    MB_String s, buf, t;
     trim(src, s, true);
     int dp = depth + 1;
     bool not_op = false;
@@ -4189,14 +4281,14 @@ int FireSenseClass::getCompareConditionType(const char c)
     return compr;
 }
 
-void FireSenseClass::parseCondition(const char *src, std::vector<struct condition_item_info_t> &conditions, int depth)
+void FireSenseClass::parseCondition(const char *src, MB_VECTOR<struct condition_item_info_t> &conditions, int depth)
 {
     if (!Firebase.ready())
         return;
 
     int orbk = 0, crbk = 0;
     bool nested = false;
-    std::string s, buf, t;
+    MB_String s, buf, t;
     trim(src, s, false);
     int dp = depth + 1;
     bool not_op = false;
@@ -4246,7 +4338,7 @@ void FireSenseClass::parseCondition(const char *src, std::vector<struct conditio
                 e.depth = depth;
                 e.next_comp_opr = compr;
                 e.not_op = not_op;
-                //e.raw = t;
+                // e.raw = t;
                 conditions.push_back(e);
                 if (nested)
                     parseCondition(t.c_str(), conditions[conditions.size() - 1].list, dp);
@@ -4271,7 +4363,7 @@ void FireSenseClass::parseCondition(const char *src, std::vector<struct conditio
             e.depth = depth;
             e.next_comp_opr = compr;
             e.not_op = not_op;
-            //e.raw = t;
+            // e.raw = t;
             conditions.push_back(e);
 
             if (nested)
@@ -4282,15 +4374,15 @@ void FireSenseClass::parseCondition(const char *src, std::vector<struct conditio
     }
 }
 
-void FireSenseClass::parseStatement(const char *src, std::vector<struct statement_item_info_t> &stm)
+void FireSenseClass::parseStatement(const char *src, MB_VECTOR<struct statement_item_info_t> &stm)
 {
     if (!Firebase.ready())
         return;
 
-    std::string s, t, left, right;
+    MB_String s, t, left, right;
     trim(src, s, false);
 
-    std::vector<std::string> stmTk = std::vector<std::string>();
+    MB_VECTOR<MB_String> stmTk;
     split(stmTk, s.c_str(), ',', '(', ')');
 
     for (size_t i = 0; i < stmTk.size(); i++)
@@ -4311,7 +4403,7 @@ void FireSenseClass::getStatement(const char *src, struct stm_item_t &data)
     if (!Firebase.ready())
         return;
 
-    std::string s, t, left, right;
+    MB_String s, t, left, right;
     trim(src, s, false);
 
     int pos = 0;
@@ -4320,24 +4412,24 @@ void FireSenseClass::getStatement(const char *src, struct stm_item_t &data)
 
     if (s.length() > 6)
     {
-        if (s.substr(0, 5) == firesense_token_t::delay)
+        if (s.substr(0, 5) == (const char *)FPSTR("delay"))
             pos = 5;
-        else if (s.substr(0, 4) == firesense_token_t::func)
+        else if (s.substr(0, 4) == (const char *)FPSTR("func"))
             pos = 4;
 
         if (pos > 0)
         {
-            p1 = s.find(firesense_token_t::left_pr, pos);
-            if (p1 != std::string::npos)
+            p1 = s.find((const char *)FPSTR("("), pos);
+            if (p1 != MB_String::npos)
             {
                 p1++;
-                p2 = s.rfind(firesense_token_t::right_pr, s.length() - 1);
-                if (p2 != std::string::npos && p2 > p1)
+                p2 = s.rfind((const char *)FPSTR(")"), s.length() - 1);
+                if (p2 != MB_String::npos && p2 > p1)
                 {
                     if (pos == 4)
                     {
                         data.left.type = stm_operand_type_function;
-                        std::vector<std::string> params = std::vector<std::string>();
+                        MB_VECTOR<MB_String> params;
                         split(params, s.substr(p1, p2 - p1).c_str(), ',', '\'', '\'');
                         int func_idx = -1;
 
@@ -4352,7 +4444,7 @@ void FireSenseClass::getStatement(const char *src, struct stm_item_t &data)
                         }
                         if (params.size() > 2)
                         {
-                            std::string s;
+                            MB_String s;
                             trim(params[2].c_str(), s, false, '\'', '\'');
                             data.left.function.payload = s;
                         }
@@ -4449,7 +4541,7 @@ void FireSenseClass::getStatement(const char *src, struct stm_item_t &data)
         {
 
             int m = 0;
-            std::string r, l;
+            MB_String r, l;
             while (m < (int)p1)
             {
                 delay(0);
@@ -4503,12 +4595,15 @@ void FireSenseClass::getStatement(const char *src, struct stm_item_t &data)
     }
 }
 
-void FireSenseClass::split(std::vector<std::string> &out, const char *str, const char delim, const char beginEsc, const char endEsc)
+void FireSenseClass::split(MB_VECTOR<MB_String> &out, const char *str, const char delim, const char beginEsc, const char endEsc)
 {
     uint16_t index = 0;
     uint16_t len = strlen(str);
     size_t sz = len * 2;
-    char buf[sz];
+    char *buf = new char[sz];
+
+    if (!buf)
+        return;
 
     size_t esc1 = 0, esc2 = 0;
 
@@ -4543,7 +4638,10 @@ void FireSenseClass::split(std::vector<std::string> &out, const char *str, const
             strncpy(buf, (char *)str + index, i - index);
             index = i + 1;
             if (strlen(buf) > 0)
-                out.push_back(buf);
+            {
+                MB_String t = buf;
+                out.push_back(t);
+            }
         }
     }
 
@@ -4552,8 +4650,13 @@ void FireSenseClass::split(std::vector<std::string> &out, const char *str, const
         memset(buf, 0, sz);
         strncpy(buf, (char *)str + index, len - index);
         if (strlen(buf) > 0)
-            out.push_back(buf);
+        {
+            MB_String t = buf;
+            out.push_back(t);
+        }
     }
+
+    delete[] buf;
 }
 
 void FireSenseClass::setLogQueryIndex()
@@ -4566,7 +4669,7 @@ void FireSenseClass::setLogQueryIndex()
 
     delay(0);
 
-    if (!Firebase.RTDB.setQueryIndex(config->shared_fbdo, logPath().c_str(), firesense_token_t::time, databaseSecret))
+    if (!FBRTDB.setQueryIndex(EXT config->shared_fbdo, logPath().c_str(), (const char *)FPSTR("time"), databaseSecret))
     {
         printError(config->shared_fbdo);
         if (config->debug)
@@ -4581,4 +4684,4 @@ void FireSenseClass::setLogQueryIndex()
 
 #endif
 
-#endif //ENABLE
+#endif // ENABLE

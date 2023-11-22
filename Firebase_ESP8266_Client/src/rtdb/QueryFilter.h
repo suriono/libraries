@@ -1,44 +1,46 @@
+#include "./core/Firebase_Client_Version.h"
+#if !FIREBASE_CLIENT_VERSION_CHECK(40408)
+#error "Mixed versions compilation."
+#endif
+
 /**
- * Google's Firebase QueryFilter class, QueryFilter.h version 1.0.1
- * 
- * This library supports Espressif ESP8266 and ESP32
- * 
- * Created April 30, 2021
- * 
- * This work is a part of Firebase ESP Client library
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
+ * Google's Firebase QueryFilter class, QueryFilter.h version 1.0.7
+ *
+ * Created December 19, 2022
+ *
  * The MIT License (MIT)
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
- * 
+ * Copyright (c) 2023 K. Suwatchai (Mobizt)
+ *
+ *
  * Permission is hereby granted, free of charge, to any person returning a copy of
  * this software and associated documentation files (the "Software"), to deal in
  * the Software without restriction, including without limitation the rights to
  * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
  * the Software, and to permit persons to whom the Software is furnished to do so,
  * subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
  * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
  * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+ */
 
-#include "FirebaseFS.h"
+#include "./FirebaseFS.h"
 
-#ifdef ENABLE_RTDB
+#if defined(ENABLE_RTDB) || defined(FIREBASE_ENABLE_RTDB)
 
 #ifndef FIREBASE_QUERY_FILTER_H
 #define FIREBASE_QUERY_FILTER_H
 #include <Arduino.h>
-#include "Utils.h"
-#include "signer/Signer.h"
+#include "./FB_Utils.h"
+#include "./core/FirebaseCore.h"
+
+using namespace mb_string;
 
 class QueryFilter
 {
@@ -49,33 +51,68 @@ class QueryFilter
 public:
     QueryFilter();
     ~QueryFilter();
-    QueryFilter &orderBy(const String &);
-    QueryFilter &limitToFirst(int);
-    QueryFilter &limitToLast(int);
-    QueryFilter &startAt(float);
-    QueryFilter &endAt(float);
-    QueryFilter &startAt(const String &);
-    QueryFilter &endAt(const String &);
-    QueryFilter &equalTo(int);
-    QueryFilter &equalTo(const String &);
+
+    template <typename T = const char *>
+    QueryFilter &orderBy(T val) { return mOrderBy(toStringPtr(val)); }
+
+    template <typename T = int>
+    QueryFilter &limitToFirst(T val) { return mLimitToFirst(toStringPtr(val, -1)); }
+
+    template <typename T = int>
+    QueryFilter &limitToLast(T val) { return mLimitToLast(toStringPtr(val, -1)); }
+
+    template <typename T = int>
+    auto startAt(T val) -> typename enable_if<is_same<T, float>::value || is_same<T, double>::value ||
+                                                  is_num_int<T>::value,
+                                              QueryFilter &>::type { return mStartAt(toStringPtr(val, -1), false); }
+
+    template <typename T = int>
+    auto endAt(T val) -> typename enable_if<is_same<T, float>::value || is_same<T, double>::value ||
+                                                is_num_int<T>::value,
+                                            QueryFilter &>::type { return mEndAt(toStringPtr(val, -1), false); }
+
+    template <typename T = const char *>
+    auto startAt(T val) -> typename enable_if<is_string<T>::value, QueryFilter &>::type
+    {
+        return mStartAt(toStringPtr(val), true);
+    }
+
+    template <typename T = const char *>
+    auto endAt(T val) -> typename enable_if<is_string<T>::value, QueryFilter &>::type
+    {
+        return mEndAt(toStringPtr(val), true);
+    }
+
+    template <typename T = int>
+    auto equalTo(T val) -> typename enable_if<is_num_int<T>::value, QueryFilter &>::type
+    {
+        return mEqualTo(toStringPtr(val), false);
+    }
+
+    template <typename T = const char *>
+    auto equalTo(T val) -> typename enable_if<is_string<T>::value, QueryFilter &>::type
+    {
+        return mEqualTo(toStringPtr(val), true);
+    }
+
     QueryFilter &clear();
 
 private:
-    std::string _orderBy = "";
-    std::string _limitToFirst = "";
-    std::string _limitToLast = "";
-    std::string _startAt = "";
-    std::string _endAt = "";
-    std::string _equalTo = "";
+    MB_String _orderBy;
+    MB_String _limitToFirst;
+    MB_String _limitToLast;
+    MB_String _startAt;
+    MB_String _endAt;
+    MB_String _equalTo;
 
-    char *strP(PGM_P pgm);
-    char *newS(size_t len);
-    void appendP(std::string &buf, PGM_P p, bool empty = false);
-    void delS(char *p);
-    char *floatStr(float value);
-    char *intStr(int value);
+    QueryFilter &mOrderBy(MB_StringPtr val);
+    QueryFilter &mLimitToFirst(MB_StringPtr val);
+    QueryFilter &mLimitToLast(MB_StringPtr val);
+    QueryFilter &mStartAt(MB_StringPtr val, bool isString);
+    QueryFilter &mEndAt(MB_StringPtr val, bool isString);
+    QueryFilter &mEqualTo(MB_StringPtr val, bool isString);
 };
 
 #endif
 
-#endif //ENABLE
+#endif // ENABLE
