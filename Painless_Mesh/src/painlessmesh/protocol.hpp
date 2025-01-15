@@ -46,7 +46,9 @@ enum TimeType {
 class PackageInterface {
  public:
   virtual JsonObject addTo(JsonObject&& jsonObj) const = 0;
+#if ARDUINOJSON_VERSION_MAJOR < 7
   virtual size_t jsonObjectSize() const = 0;
+#endif
 };
 
 /**
@@ -82,9 +84,11 @@ class Single : public PackageInterface {
     return jsonObj;
   }
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     return JSON_OBJECT_SIZE(4) + ceil(1.1 * msg.length());
   }
+#endif
 };
 
 /**
@@ -102,9 +106,11 @@ class Broadcast : public Single {
     return jsonObj;
   }
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     return JSON_OBJECT_SIZE(4) + ceil(1.1 * msg.length());
   }
+#endif
 };
 
 class NodeTree : public PackageInterface {
@@ -121,13 +127,23 @@ class NodeTree : public PackageInterface {
   }
 
   NodeTree(JsonObject jsonObj) {
+#if ARDUINOJSON_VERSION_MAJOR < 7
     if (jsonObj.containsKey("root")) root = jsonObj["root"].as<bool>();
     if (jsonObj.containsKey("nodeId"))
+#else
+
+    if (jsonObj["root"].is<bool>()) root = jsonObj["root"].as<bool>();
+    if (jsonObj["nodeId"].is<uint32_t>())
+#endif
       nodeId = jsonObj["nodeId"].as<uint32_t>();
     else
       nodeId = jsonObj["from"].as<uint32_t>();
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
     if (jsonObj.containsKey("subs")) {
+#else
+    if (jsonObj["subs"].is<JsonArray>()) {
+#endif
       auto jsonArr = jsonObj["subs"].as<JsonArray>();
       for (size_t i = 0; i < jsonArr.size(); ++i) {
         subs.push_back(NodeTree(jsonArr[i].as<JsonObject>()));
@@ -139,9 +155,17 @@ class NodeTree : public PackageInterface {
     jsonObj["nodeId"] = nodeId;
     if (root) jsonObj["root"] = root;
     if (subs.size() > 0) {
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      JsonArray subsArr = jsonObj["subs"].to<JsonArray>();
+#else
       JsonArray subsArr = jsonObj.createNestedArray("subs");
+#endif
       for (auto&& s : subs) {
+#if ARDUINOJSON_VERSION_MAJOR == 7
+        JsonObject subObj = subsArr.add<JsonObject>();
+#else
         JsonObject subObj = subsArr.createNestedObject();
+#endif
         subObj = s.addTo(std::move(subObj));
       }
     }
@@ -168,6 +192,7 @@ class NodeTree : public PackageInterface {
 
   TSTRING toString(bool pretty = false);
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     size_t base = 1;
     if (root) ++base;
@@ -177,6 +202,7 @@ class NodeTree : public PackageInterface {
     for (auto&& s : subs) size += s.jsonObjectSize();
     return size;
   }
+#endif
 
   void clear() {
     nodeId = 0;
@@ -226,6 +252,7 @@ class NodeSyncRequest : public NodeTree {
     return !this->operator==(b);
   }
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     size_t base = 4;
     if (root) ++base;
@@ -235,6 +262,7 @@ class NodeSyncRequest : public NodeTree {
     for (auto&& s : subs) size += s.jsonObjectSize();
     return size;
   }
+#endif
 };
 
 /**
@@ -307,19 +335,32 @@ class TimeSync : public PackageInterface {
     dest = jsonObj["dest"].as<uint32_t>();
     from = jsonObj["from"].as<uint32_t>();
     msg.type = jsonObj["msg"]["type"].as<int>();
+#if ARDUINOJSON_VERSION_MAJOR < 7
     if (jsonObj["msg"].containsKey("t0"))
       msg.t0 = jsonObj["msg"]["t0"].as<uint32_t>();
     if (jsonObj["msg"].containsKey("t1"))
       msg.t1 = jsonObj["msg"]["t1"].as<uint32_t>();
     if (jsonObj["msg"].containsKey("t2"))
       msg.t2 = jsonObj["msg"]["t2"].as<uint32_t>();
+#else
+    if (jsonObj["msg"]["t0"].is<uint32_t>())
+      msg.t0 = jsonObj["msg"]["t0"].as<uint32_t>();
+    if (jsonObj["msg"]["t1"].is<uint32_t>())
+      msg.t1 = jsonObj["msg"]["t1"].as<uint32_t>();
+    if (jsonObj["msg"]["t2"].is<uint32_t>())
+      msg.t2 = jsonObj["msg"]["t2"].as<uint32_t>();
+#endif
   }
 
   JsonObject addTo(JsonObject&& jsonObj) const {
     jsonObj["type"] = type;
     jsonObj["dest"] = dest;
     jsonObj["from"] = from;
+#if ARDUINOJSON_VERSION_MAJOR == 7
+    auto msgObj = jsonObj["msg"].to<JsonObject>();
+#else
     auto msgObj = jsonObj.createNestedObject("msg");
+#endif
     msgObj["type"] = msg.type;
     if (msg.type >= 1) msgObj["t0"] = msg.t0;
     if (msg.type >= 2) {
@@ -348,9 +389,11 @@ class TimeSync : public PackageInterface {
     std::swap(from, dest);
   }
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     return JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(4);
   }
+#endif
 };
 
 /**
@@ -383,8 +426,12 @@ class Variant {
    * @param json The json string containing a package
    */
   Variant(std::string json)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
       : jsonBuffer(JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(4) +
                    2 * json.length()) {
+#endif
     error = deserializeJson(jsonBuffer, json,
                             DeserializationOption::NestingLimit(255));
     if (!error) jsonObj = jsonBuffer.as<JsonObject>();
@@ -396,7 +443,12 @@ class Variant {
    * @param json The json string containing a package
    * @param capacity The capacity to reserve for parsing the string
    */
-  Variant(std::string json, size_t capacity) : jsonBuffer(capacity) {
+  Variant(std::string json, size_t capacity)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(capacity) {
+#endif
     error = deserializeJson(jsonBuffer, json,
                             DeserializationOption::NestingLimit(255));
     if (!error) jsonObj = jsonBuffer.as<JsonObject>();
@@ -410,8 +462,12 @@ class Variant {
    * @param json The json string containing a package
    */
   Variant(String json)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
       : jsonBuffer(JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(4) +
                    2 * json.length()) {
+#endif
     error = deserializeJson(jsonBuffer, json,
                             DeserializationOption::NestingLimit(255));
     if (!error) jsonObj = jsonBuffer.as<JsonObject>();
@@ -423,7 +479,12 @@ class Variant {
    * @param json The json string containing a package
    * @param capacity The capacity to reserve for parsing the string
    */
-  Variant(String json, size_t capacity) : jsonBuffer(capacity) {
+  Variant(String json, size_t capacity)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(capacity) {
+#endif
     error = deserializeJson(jsonBuffer, json,
                             DeserializationOption::NestingLimit(255));
     if (!error) jsonObj = jsonBuffer.as<JsonObject>();
@@ -432,7 +493,12 @@ class Variant {
   /**
    * Create Variant object from any package implementing PackageInterface
    */
-  Variant(const PackageInterface* pkg) : jsonBuffer(pkg->jsonObjectSize()) {
+  Variant(const PackageInterface* pkg)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(pkg->jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = pkg->addTo(std::move(jsonObj));
   }
@@ -442,7 +508,12 @@ class Variant {
    *
    * @param single The single package
    */
-  Variant(Single single) : jsonBuffer(single.jsonObjectSize()) {
+  Variant(Single single)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(single.jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = single.addTo(std::move(jsonObj));
   }
@@ -452,7 +523,12 @@ class Variant {
    *
    * @param broadcast The broadcast package
    */
-  Variant(Broadcast broadcast) : jsonBuffer(broadcast.jsonObjectSize()) {
+  Variant(Broadcast broadcast)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(broadcast.jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = broadcast.addTo(std::move(jsonObj));
   }
@@ -462,7 +538,12 @@ class Variant {
    *
    * @param nodeTree The NodeTree
    */
-  Variant(NodeTree nodeTree) : jsonBuffer(nodeTree.jsonObjectSize()) {
+  Variant(NodeTree nodeTree)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(nodeTree.jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = nodeTree.addTo(std::move(jsonObj));
   }
@@ -473,7 +554,11 @@ class Variant {
    * @param nodeSyncReply The nodeSyncReply package
    */
   Variant(NodeSyncReply nodeSyncReply)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
       : jsonBuffer(nodeSyncReply.jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = nodeSyncReply.addTo(std::move(jsonObj));
   }
@@ -484,7 +569,11 @@ class Variant {
    * @param nodeSyncRequest The nodeSyncRequest package
    */
   Variant(NodeSyncRequest nodeSyncRequest)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
       : jsonBuffer(nodeSyncRequest.jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = nodeSyncRequest.addTo(std::move(jsonObj));
   }
@@ -494,7 +583,12 @@ class Variant {
    *
    * @param timeSync The timeSync package
    */
-  Variant(TimeSync timeSync) : jsonBuffer(timeSync.jsonObjectSize()) {
+  Variant(TimeSync timeSync)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(timeSync.jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = timeSync.addTo(std::move(jsonObj));
   }
@@ -504,7 +598,12 @@ class Variant {
    *
    * @param timeDelay The timeDelay package
    */
-  Variant(TimeDelay timeDelay) : jsonBuffer(timeDelay.jsonObjectSize()) {
+  Variant(TimeDelay timeDelay)
+#if ARDUINOJSON_VERSION_MAJOR == 7
+      : jsonBuffer() {
+#else
+      : jsonBuffer(timeDelay.jsonObjectSize()) {
+#endif
     jsonObj = jsonBuffer.to<JsonObject>();
     jsonObj = timeDelay.addTo(std::move(jsonObj));
   }
@@ -534,7 +633,11 @@ class Variant {
    * Package routing method
    */
   router::Type routing() {
+#if ARDUINOJSON_VERSION_MAJOR < 7
     if (jsonObj.containsKey("routing"))
+#else
+    if (jsonObj["routing"].is<int>())
+#endif
       return (router::Type)jsonObj["routing"].as<int>();
 
     auto type = this->type();
@@ -550,7 +653,11 @@ class Variant {
    * Destination node of the package
    */
   uint32_t dest() {
+#if ARDUINOJSON_VERSION_MAJOR < 7
     if (jsonObj.containsKey("dest")) return jsonObj["dest"].as<uint32_t>();
+#else
+    if (jsonObj["dest"].is<uint32_t>()) return jsonObj["dest"].as<uint32_t>();
+#endif
     return 0;
   }
 
@@ -585,7 +692,11 @@ class Variant {
   DeserializationError error = DeserializationError::Ok;
 
  private:
+#if ARDUINOJSON_VERSION_MAJOR == 7
+  JsonDocument jsonBuffer;
+#else
   DynamicJsonDocument jsonBuffer;
+#endif
   JsonObject jsonObj;
 };
 

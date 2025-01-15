@@ -17,6 +17,7 @@
 
    This software is not intended for medical use.
 */
+
 #include <PulseSensorPlayground.h>
 
 PulseSensorTimingStatistics::PulseSensorTimingStatistics(

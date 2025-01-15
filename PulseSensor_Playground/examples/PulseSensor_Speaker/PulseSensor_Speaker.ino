@@ -1,12 +1,15 @@
 /*
-   Code to detect pulses from the PulseSensor,
-   using an interrupt service routine.
+   Code to detect pulses from the PulseSensor
 
    >>>>  THIS EXAMPLE OUTPUTS USES TONE COMMAND <<<<
    >>>>  TO MAKE A SPEAKER BEEP WITH HEARTBEAT! <<<<
 
    Here is a link to the tutorial
    https://pulsesensor.com/pages/pulse-sensor-speaker-tutorial
+
+   Check out the PulseSensor Playground Tools for explaination
+   of all user functions and directives.
+   https://github.com/WorldFamousElectronics/PulseSensorPlayground/blob/master/resources/PulseSensor%20Playground%20Tools.md
 
    Copyright World Famous Electronics LLC - see LICENSE
    Contributors:
@@ -21,14 +24,13 @@
 */
 
 /*
-   Every Sketch that uses the PulseSensor Playground must
-   define USE_ARDUINO_INTERRUPTS before including PulseSensorPlayground.h.
-   Here, #define USE_ARDUINO_INTERRUPTS true tells the library to use
-   interrupts to automatically read and process PulseSensor data.
-
-   See PulseSensor_BPM_Alternative.ino for an example of not using interrupts.
+   Include the PulseSensor Playground library to get all the good stuff!
+   The PulseSensor Playground library will decide whether to use
+   a hardware timer to get accurate sample readings by checking
+   what target hardware is being used and adjust accordingly.
+   You may see a "warning" come up in red during compilation
+   if a hardware timer is not being used.
 */
-#define USE_ARDUINO_INTERRUPTS true
 #include <PulseSensorPlayground.h>
 
 /*
@@ -80,9 +82,9 @@ PulseSensorPlayground pulseSensor;
         Then connect - side of electrolytic capacitor to GND.
         Capacitor value should be 1uF or higher!
         Follow this tutorial:
-        [link]
+        https://pulsesensor.com/pages/pulse-sensor-speaker-tutorial
 */
-const int PIN_SPEAKER = 2;    // speaker on pin2 makes a beep with heartbeat
+const int SPEAKER_PIN = 3;    // speaker on pin3 makes a beep with your heartbeat
 
 
 void setup() {
@@ -129,14 +131,49 @@ void setup() {
 
 void loop() {
   /*
-     Wait a bit.
-     We don't output every sample, because our baud rate
-     won't support that much I/O.
-  */
-  delay(20);
+     See if a sample is ready from the PulseSensor.
 
-  // write the latest sample to Serial.
-  pulseSensor.outputSample();
+     If USE_HARDWARE_TIMER is true, the PulseSensor Playground
+     will automatically read and process samples from
+     the PulseSensor.
+
+     If USE_HARDWARE_TIMER is false, the call to sawNewSample()
+     will check to see how much time has passed, then read
+     and process a sample (analog voltage) from the PulseSensor.
+     Call this function often to maintain 500Hz sample rate,
+     that is every 2 milliseconds. Best not to have any delay() 
+     functions in the loop when using a software timer.
+
+     Check the compatibility of your hardware at this link
+     <url>
+     and delete the unused code portions in your saved copy, if you like.
+  */
+  if(pulseSensor.UsingHardwareTimer){
+    /*
+       Wait a bit.
+       We don't output every sample, because our baud rate
+       won't support that much I/O.
+    */
+    delay(20); 
+    // write the latest sample to Serial.
+    pulseSensor.outputSample();
+  } else {
+  /*
+      When using a software timer, we have to check to see if it is time
+      to acquire another sample. A call to sawNewSample will do that.
+  */
+    if (pulseSensor.sawNewSample()) {
+      /*
+          Every so often, send the latest Sample.
+          We don't print every sample, because our baud rate
+          won't support that much I/O.
+      */
+      if (--pulseSensor.samplesUntilReport == (byte) 0) {
+        pulseSensor.samplesUntilReport = SAMPLES_PER_SERIAL_SAMPLE;
+        pulseSensor.outputSample();
+      }
+    }
+  }
 
   /*
      If a beat has happened since we last checked,
@@ -146,7 +183,7 @@ void loop() {
    */
   if (pulseSensor.sawStartOfBeat()) {
     pulseSensor.outputBeat();
-    tone(PIN_SPEAKER,932);              // tone(pin,frequency)
+    heartBeep(SPEAKER_PIN,true);
   }
 
   /*
@@ -154,7 +191,25 @@ void loop() {
     Use this to time the duration of the beep
   */
   if(pulseSensor.isInsideBeat() == false){
-    noTone(PIN_SPEAKER);
+    heartBeep(SPEAKER_PIN,false);
   }
 
+}
+/*
+  heartBeep(to beep or not to beep)
+  This function will reliably output a clean tone (500Hz on AVR, sounds about Bb). 
+  You can try the tone() function that comes in the Arduino core if you want a different note, but it will be noisy.
+    The Arduino tone() function starts up a hardware timer at a specific freqeuency, and initializes an interrupt.
+    The problem with using tone() is that the interrupt needs to be called in order to toggle the pin at frequency.
+    The tone() interrupt collides with our PulseSensor interrupt and operations. Thankfully, tone() breaks and not PulseSensor!
+    The arduino core needs to be updated so that the tone library operates 'hands free' like the PWM library.
+    Or, the PWM library needs to be updated to accept a frequency parameter to ensure a clean(er) note.
+    There are some architectures upon which the Tone library might work: nRF52? ESP32? 
+*/
+void heartBeep(int pin, bool beep){
+  if(beep){
+    analogWrite(pin,127);
+  } else {
+    analogWrite(pin,0);
+  }
 }

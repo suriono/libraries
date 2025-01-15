@@ -46,7 +46,13 @@ class Mesh : public painlessmesh::Mesh<Connection> {
     if (WiFi.status() != WL_DISCONNECTED) WiFi.disconnect();
 
     Log(STARTUP, "init(): %d\n",
-        WiFi.setAutoConnect(false));  // Disable autoconnect
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+        // Disable autoconnect
+        WiFi.setAutoReconnect(false));
+#else
+        // Disable autoconnect
+        WiFi.setAutoConnect(false));
+#endif
     WiFi.persistent(false);
 
     // start configuration
@@ -62,9 +68,13 @@ class Mesh : public painlessmesh::Mesh<Connection> {
     _meshPort = port;
 
     uint8_t MAC[] = {0, 0, 0, 0, 0, 0};
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    esp_read_mac(MAC, ESP_MAC_WIFI_SOFTAP);
+#else
     if (WiFi.softAPmacAddress(MAC) == 0) {
       Log(ERROR, "init(): WiFi.softAPmacAddress(MAC) failed.\n");
     }
+#endif
     uint32_t nodeId = tcp::encodeNodeId(MAC);
     if (nodeId == 0) Log(ERROR, "NodeId set to 0\n");
 
@@ -252,7 +262,7 @@ class Mesh : public painlessmesh::Mesh<Connection> {
             this->semaphoreGive();
           }
         },
-#if ESP_ARDUINO_VERSION_MAJOR >= 2 
+#if ESP_ARDUINO_VERSION_MAJOR >= 2
         WiFiEvent_t::ARDUINO_EVENT_WIFI_SCAN_DONE);
 #else
         WiFiEvent_t::SYSTEM_EVENT_SCAN_DONE);
@@ -266,12 +276,11 @@ class Mesh : public painlessmesh::Mesh<Connection> {
             this->semaphoreGive();
           }
         },
-#if ESP_ARDUINO_VERSION_MAJOR >= 2 
+#if ESP_ARDUINO_VERSION_MAJOR >= 2
         WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_START);
 #else
         WiFiEvent_t::SYSTEM_EVENT_STA_START);
 #endif
-
 
     eventSTADisconnectedHandler = WiFi.onEvent(
         [this](WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -283,7 +292,7 @@ class Mesh : public painlessmesh::Mesh<Connection> {
             this->semaphoreGive();
           }
         },
-#if ESP_ARDUINO_VERSION_MAJOR >= 2 
+#if ESP_ARDUINO_VERSION_MAJOR >= 2
         WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 #else
         WiFiEvent_t::SYSTEM_EVENT_STA_DISCONNECTED);
@@ -298,7 +307,7 @@ class Mesh : public painlessmesh::Mesh<Connection> {
             this->semaphoreGive();
           }
         },
-#if ESP_ARDUINO_VERSION_MAJOR >= 2 
+#if ESP_ARDUINO_VERSION_MAJOR >= 2
         WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
 #else
         WiFiEvent_t::SYSTEM_EVENT_STA_GOT_IP);

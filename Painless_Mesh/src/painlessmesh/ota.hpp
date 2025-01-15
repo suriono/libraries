@@ -7,16 +7,25 @@
 #include "painlessmesh/logger.hpp"
 #include "painlessmesh/plugin.hpp"
 
+#if !defined(USE_FS_SPIFFS) && !defined(USE_FS_LITTLEFS)
 #if defined(ESP32) || defined(ESP8266)
 #ifdef ESP32
-#include <SPIFFS.h>
-#include <Update.h>
+#define USE_FS_SPIFFS
 #else
+#define USE_FS_LITTLEFS
+#endif
+#endif
+#endif
+
+#ifdef ESP32
+#include <Update.h>
+#endif
+
+#if defined(USE_FS_SPIFFS)
+#include <SPIFFS.h>
+#elif defined(USE_FS_LITTLEFS)
 #include <LittleFS.h>
 #endif
-#endif
-
-
 
 namespace painlessmesh {
 namespace plugin {
@@ -45,6 +54,15 @@ namespace plugin {
  * has all the data, written it and reboots into the new firmware.
  */
 namespace ota {
+
+/**
+ * Operation codes for various firmware states
+ */
+enum class OTA_OP_CODES {
+  ANNOUNCE = 10,      // Announce a new update
+  DATA_REQUEST = 11,  // Request data from host
+  DATA = 12,          // Inbound data to nodes
+};
 
 /** Package used by the firmware distribution node to announce new version
  * available
@@ -77,6 +95,15 @@ class Announce : public BroadcastPackage {
    * Mainly usefull when testing updates etc.
    */
   bool forced = false;
+
+  /** Receive broadcast chunks. The default behavior is to have each node
+   * request and receive each of its firwmare payload chunks, however this can
+   * in some cases create a lot of additional network traffic. If broadcasted is
+   * true, the root node will act on behalf of all other nodes in leading the
+   * request for packets.
+   */
+  bool broadcasted = false;
+
   size_t noPart;
 
   Announce() : BroadcastPackage(10) {}
@@ -85,7 +112,14 @@ class Announce : public BroadcastPackage {
     md5 = jsonObj["md5"].as<TSTRING>();
     hardware = jsonObj["hardware"].as<TSTRING>();
     role = jsonObj["role"].as<TSTRING>();
+#if ARDUINOJSON_VERSION_MAJOR < 7
     if (jsonObj.containsKey("forced")) forced = jsonObj["forced"];
+    if (jsonObj.containsKey("broadcasted"))
+      broadcasted = jsonObj["broadcasted"];
+#else
+    if (jsonObj["forced"].is<bool>()) forced = jsonObj["forced"];
+    if (jsonObj["broadcasted"].is<bool>()) broadcasted = jsonObj["broadcasted"];
+#endif
     noPart = jsonObj["noPart"];
   }
 
@@ -96,13 +130,16 @@ class Announce : public BroadcastPackage {
     jsonObj["role"] = role;
     if (forced) jsonObj["forced"] = forced;
     jsonObj["noPart"] = noPart;
+    jsonObj["broadcasted"] = broadcasted;
     return jsonObj;
   }
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     return JSON_OBJECT_SIZE(noJsonFields + 5) +
            round(1.1 * (md5.length() + hardware.length() + role.length()));
   }
+#endif
 
  protected:
   Announce(int type, router::Type routing) : BroadcastPackage(type) {
@@ -149,15 +186,18 @@ class DataRequest : public Announce {
     req.noPart = ann.noPart;
     req.partNo = partNo;
     req.from = from;
+    req.broadcasted = ann.broadcasted;
     return req;
   }
 
   static DataRequest replyTo(const Data& d, size_t partNo);
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     return JSON_OBJECT_SIZE(noJsonFields + 5 + 2) +
            round(1.1 * (md5.length() + hardware.length() + role.length()));
   }
+#endif
 
  protected:
   DataRequest(int type) : Announce(type, router::SINGLE) {}
@@ -194,14 +234,17 @@ class Data : public DataRequest {
     d.noPart = req.noPart;
     d.partNo = partNo;
     d.data = data;
+    d.broadcasted = req.broadcasted;
     return d;
   }
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     return JSON_OBJECT_SIZE(noJsonFields + 5 + 2 + 1) +
            round(1.1 * (md5.length() + hardware.length() + role.length() +
                         data.length()));
   }
+#endif
 };
 
 inline DataRequest DataRequest::replyTo(const Data& d, size_t partNo) {
@@ -214,6 +257,7 @@ inline DataRequest DataRequest::replyTo(const Data& d, size_t partNo) {
   req.forced = d.forced;
   req.noPart = d.noPart;
   req.partNo = partNo;
+  req.broadcasted = d.broadcasted;
   return req;
 }
 
@@ -235,6 +279,7 @@ class State : public protocol::PackageInterface {
   TSTRING role;
   size_t noPart = 0;
   size_t partNo = 0;
+  bool broadcasted = false;
   TSTRING ota_fn = "/ota_fw.json";
 
   State() {}
@@ -243,6 +288,7 @@ class State : public protocol::PackageInterface {
     md5 = jsonObj["md5"].as<TSTRING>();
     hardware = jsonObj["hardware"].as<TSTRING>();
     role = jsonObj["role"].as<TSTRING>();
+    broadcasted = jsonObj["broadcasted"].as<bool>();
   }
 
   State(const Announce& ann) {
@@ -250,75 +296,84 @@ class State : public protocol::PackageInterface {
     hardware = ann.hardware;
     role = ann.role;
     noPart = ann.noPart;
+    broadcasted = ann.broadcasted;
   }
 
   JsonObject addTo(JsonObject&& jsonObj) const {
     jsonObj["role"] = role;
     jsonObj["md5"] = md5;
     jsonObj["hardware"] = hardware;
+    jsonObj["broadcasted"] = broadcasted;
     return jsonObj;
   }
 
+#if ARDUINOJSON_VERSION_MAJOR < 7
   size_t jsonObjectSize() const {
     return JSON_OBJECT_SIZE(3) +
            round(1.1 * (md5.length() + hardware.length() + role.length()));
   }
+#endif
 
   std::shared_ptr<Task> task;
 };
 
-typedef std::function<size_t(painlessmesh::plugin::ota::DataRequest, char* buffer)> otaDataPacketCallbackType_t;
+typedef std::function<size_t(painlessmesh::plugin::ota::DataRequest,
+                             char* buffer)>
+    otaDataPacketCallbackType_t;
 
 template <class T>
-void addSendPackageCallback(Scheduler& scheduler, plugin::PackageHandler<T>& mesh,
-                        otaDataPacketCallbackType_t callback,size_t otaPartSize){
-    using namespace logger;
-    #if defined(ESP32) || defined(ESP8266)
+void addSendPackageCallback(Scheduler& scheduler,
+                            plugin::PackageHandler<T>& mesh,
+                            otaDataPacketCallbackType_t callback,
+                            size_t otaPartSize) {
+  using namespace logger;
+#if defined(ESP32) || defined(ESP8266)
+  mesh.onPackage(
+      (int)OTA_OP_CODES::DATA_REQUEST,
+      [&mesh, callback, otaPartSize](painlessmesh::protocol::Variant variant) {
+        auto pkg = variant.to<painlessmesh::plugin::ota::DataRequest>();
+        char buffer[otaPartSize + 1];
+        memset(buffer, 0, otaPartSize + 1);
+        auto size = callback(pkg, buffer);
+        // Handle zero size
+        if (!size) {
+          // No data is available by the user app.
 
-    mesh.onPackage(11,[&mesh,callback,otaPartSize](painlessmesh::protocol::Variant variant){
-      
-      auto pkg = variant.to<painlessmesh::plugin::ota::DataRequest>();
-      char buffer[otaPartSize+1];
-      memset(buffer, 0,otaPartSize+1);
-      auto size = callback(pkg,buffer);
-      // Handle zero size
-      if(!size){
-        // No data is available by the user app. 
-
-        // todo - doubtful, shall we return true or false. What is the purpose of this return value.  
+          // todo - doubtful, shall we return true or false. What is the purpose
+          // of this return value.
+          return true;
+        }
+        // Encode data as base64 so there are no null characters and can be
+        // shown in plaintext
+        auto b64Data =
+            painlessmesh::base64::encode((unsigned char*)buffer, size);
+        auto reply =
+            painlessmesh::plugin::ota::Data::replyTo(pkg, b64Data, pkg.partNo);
+        mesh.sendPackage(&reply);
         return true;
-      }
-      //Encode data as base64 so there are no null characters and can be shown in plaintext
-      auto b64Data = painlessmesh::base64::encode((unsigned char * )buffer,size);
-      auto reply =
-              painlessmesh::plugin::ota::Data::replyTo(pkg,
-                                b64Data,
-                                 pkg.partNo);
-      mesh.sendPackage(&reply);
-      return true;
-    });
+      });
 
-    #endif
+#endif
 }
 
-
 template <class T>
-void addReceivePackageCallback(Scheduler& scheduler, plugin::PackageHandler<T>& mesh,
-                        TSTRING role = "") {
+void addReceivePackageCallback(
+    Scheduler& scheduler, plugin::PackageHandler<T>& mesh, TSTRING role = "",
+    std::function<void(int, int)> progress_cb = NULL) {
   using namespace logger;
 #if defined(ESP32) || defined(ESP8266)
   auto currentFW = std::make_shared<State>();
   currentFW->role = role;
   auto updateFW = std::make_shared<State>();
   updateFW->role = role;
-#ifdef ESP32
+#ifdef USE_FS_SPIFFS
   SPIFFS.begin(true);  // Start the SPI Flash Files System
   if (SPIFFS.exists(currentFW->ota_fn)) {
-  auto file = SPIFFS.open(currentFW->ota_fn, "r");
+    auto file = SPIFFS.open(currentFW->ota_fn, "r");
 #else
   LittleFS.begin();  // Start the SPI Flash Files System
   if (LittleFS.exists(currentFW->ota_fn)) {
-  auto file = LittleFS.open(currentFW->ota_fn, "r");
+    auto file = LittleFS.open(currentFW->ota_fn, "r");
 #endif
     TSTRING msg = "";
     while (file.available()) {
@@ -332,27 +387,34 @@ void addReceivePackageCallback(Scheduler& scheduler, plugin::PackageHandler<T>& 
     }
   }
 
-  mesh.onPackage(10, [currentFW, updateFW, &mesh,
-                      &scheduler](protocol::Variant variant) {
+  mesh.onPackage((int)OTA_OP_CODES::ANNOUNCE, [currentFW, updateFW, &mesh,
+                                               &scheduler](
+                                                  protocol::Variant variant) {
     // convert variant to Announce
     auto pkg = variant.to<Announce>();
     // Check if we want the update
     if (currentFW->role == pkg.role && currentFW->hardware == pkg.hardware) {
       if ((currentFW->md5 == pkg.md5 && !pkg.forced) ||
-          updateFW->md5 == pkg.md5)
+          updateFW->md5 == pkg.md5) {
         // Either already have it, or already updating to it
         return false;
-      else {
-        auto request = DataRequest::replyTo(pkg, mesh.getNodeId(), updateFW->partNo);
+      } else {
         updateFW->md5 = pkg.md5;
-        // enable the request task
-        updateFW->task =
-            mesh.addTask(scheduler, 30 * TASK_SECOND, 10,
-                         [request, &mesh]() { mesh.sendPackage(&request); });
-        updateFW->task->setOnDisable([updateFW]() {
-          Log(ERROR, "OTA: Did not receive the requested data.\n");
-          updateFW->md5 = "";
-        });
+        updateFW->broadcasted = pkg.broadcasted;
+        // If we are not in broadcasted mode, or we are the root node, begin
+        // requesting data
+        if (!pkg.broadcasted || mesh.isRoot()) {
+          auto request =
+              DataRequest::replyTo(pkg, mesh.getNodeId(), updateFW->partNo);
+          // enable the request task
+          updateFW->task =
+              mesh.addTask(scheduler, 30 * TASK_SECOND, 10,
+                           [request, &mesh]() { mesh.sendPackage(&request); });
+          updateFW->task->setOnDisable([updateFW]() {
+            Log(ERROR, "OTA: Did not receive the requested data.\n");
+            updateFW->md5 = "";
+          });
+        }
       }
     }
     return false;
@@ -363,91 +425,124 @@ void addReceivePackageCallback(Scheduler& scheduler, plugin::PackageHandler<T>& 
   //   return false;
   // });
 
-  mesh.onPackage(12, [currentFW, updateFW, &mesh,
-                      &scheduler](protocol::Variant variant) {
+  mesh.onPackage((int)OTA_OP_CODES::DATA, [currentFW, updateFW, progress_cb,
+                                           &mesh, &scheduler](
+                                              protocol::Variant variant) {
     auto pkg = variant.to<Data>();
     // Check whether it is a new part, of correct md5 role etc etc
-    if (updateFW->partNo == pkg.partNo && updateFW->md5 == pkg.md5 &&
-        updateFW->role == pkg.role && updateFW->hardware == pkg.hardware) {
-      // If so write
-      if (pkg.partNo == 0) {
-#ifdef ESP32
-        uint32_t maxSketchSpace = UPDATE_SIZE_UNKNOWN;
-#else
-        uint32_t maxSketchSpace =
-                (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-#endif
-        Log(DEBUG, "Sketch size %d\n", maxSketchSpace);
-        if (Update.isRunning()) {
-          Update.end(false);
+    if (updateFW->md5 == pkg.md5 && updateFW->role == pkg.role &&
+        updateFW->hardware == pkg.hardware) {
+      // Have we have received the next chunk of firmware in sequence?
+      if (updateFW->partNo == pkg.partNo) {
+        if (progress_cb != NULL) {
+          progress_cb(pkg.partNo, pkg.noPart);
         }
-        if (!Update.begin(maxSketchSpace)) {  // start with max available size
-          Log(DEBUG, "handleOTA(): OTA start failed!");
+        if (pkg.partNo == 0) {
+#ifdef ESP32
+          uint32_t maxSketchSpace = UPDATE_SIZE_UNKNOWN;
+#else
+          uint32_t maxSketchSpace =
+                  (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+#endif
+          Log(DEBUG, "Sketch size %d\n", maxSketchSpace);
+          if (Update.isRunning()) {
+            Update.end(false);
+          }
+          if (!Update.begin(maxSketchSpace)) {  // start with max available size
+            Log(DEBUG, "handleOTA(): OTA start failed!");
+            Update.printError(Serial);
+            Update.end();
+          } else {
+            Update.setMD5(pkg.md5.c_str());
+          }
+        }
+
+        //    write data
+        auto b64Data = base64::decode(pkg.data);
+        if (Update.write((uint8_t*)b64Data.c_str(), b64Data.length()) !=
+            b64Data.length()) {
+          Log(ERROR, "handleOTA(): OTA write failed!");
           Update.printError(Serial);
           Update.end();
-        } else {
-          Update.setMD5(pkg.md5.c_str());
-        }
-      }
-
-      //    write data
-      auto b64Data = base64::decode(pkg.data);
-      if (Update.write((uint8_t*)b64Data.c_str(), b64Data.length()) !=
-          b64Data.length()) {
-        Log(ERROR, "handleOTA(): OTA write failed!");
-        Update.printError(Serial);
-        Update.end();
-        updateFW->md5 = "";
-        updateFW->partNo = 0;
-        return false;
-      }
-
-      // If last part then write ota_fn and reboot
-      if (pkg.partNo == pkg.noPart - 1) {
-        //       check md5, reboot
-        if (Update.end(true)) {  // true to set the size to the
-                                 // current progress
-        #ifdef ESP32                   
-          auto file = SPIFFS.open(updateFW->ota_fn, "w");
-          if (!file) {
-            Log(ERROR, "handleOTA(): Unable to write md5 of new update to the SPIFFS file. This will result in endless update loops for OTA\n");
-          }
-        #else
-          auto file = LittleFS.open(updateFW->ota_fn, "w");
-          if (!file) {
-            Log(ERROR, "handleOTA(): Unable to write md5 of new binary to the LittleFS file. This will result in endless update loops for OTA\n");
-          }
-        #endif
-
-          String msg;
-          auto var = protocol::Variant(updateFW.get());
-          var.printTo(msg);
-          file.print(msg);
-          file.close();
-
-          Log(DEBUG, "handleOTA(): OTA Success! %s, %s\n", msg.c_str(),
-              updateFW->role.c_str());
-          ESP.restart();
-        } else {
-          Log(DEBUG, "handleOTA(): OTA failed!\n");
-          Update.printError(Serial);
           updateFW->md5 = "";
           updateFW->partNo = 0;
+          return false;
         }
-        updateFW->task->setOnDisable(NULL);
-        updateFW->task->disable();
+
+        // If last part then write ota_fn and reboot
+        if (pkg.partNo == pkg.noPart - 1) {
+          // check md5, reboot
+          if (Update.end(true)) {  // true to set the size to the
+                                   // current progress
+#ifdef USE_FS_SPIFFS
+            auto file = SPIFFS.open(updateFW->ota_fn, "w");
+            if (!file) {
+              Log(ERROR,
+                  "handleOTA(): Unable to write md5 of new update to the "
+                  "SPIFFS "
+                  "file. This will result in endless update loops for OTA\n");
+            }
+#else
+            auto file = LittleFS.open(updateFW->ota_fn, "w");
+            if (!file) {
+              Log(ERROR, "handleOTA(): Unable to write md5 of new binary to the LittleFS file. This will result in endless update loops for OTA\n");
+            }
+#endif
+
+            String msg;
+            auto var = protocol::Variant(updateFW.get());
+            var.printTo(msg);
+            file.print(msg);
+            file.close();
+
+            Log(DEBUG, "handleOTA(): OTA Success! %s, %s\n", msg.c_str(),
+                updateFW->role.c_str());
+            // Delay restart by 2 seconds to allow mesh activity to finish
+            mesh.addTask(scheduler, 2 * TASK_SECOND, TASK_ONCE,
+                         []() { ESP.restart(); })
+                ->enableDelayed();
+          } else {
+            Log(DEBUG, "handleOTA(): OTA failed!\n");
+            Update.printError(Serial);
+            updateFW->md5 = "";
+            updateFW->partNo = 0;
+          }
+          if (updateFW->task != NULL) {
+            updateFW->task->setOnDisable(NULL);
+            updateFW->task->disable();
+          }
+        } else {
+          // else request more
+          ++updateFW->partNo;
+          if (updateFW->task != NULL) {
+            auto request = DataRequest::replyTo(pkg, updateFW->partNo);
+            updateFW->task->setCallback(
+                [request, &mesh]() { mesh.sendPackage(&request); });
+            // updateFW->task->disable();
+            updateFW->task->restart();
+          }
+        }
       } else {
-        // else request more
-        ++updateFW->partNo;
-        auto request = DataRequest::replyTo(pkg, updateFW->partNo);
-        updateFW->task->setCallback(
-            [request, &mesh]() { mesh.sendPackage(&request); });
-        //updateFW->task->disable();
-        updateFW->task->restart();
+        // We are out-of-sequence, resume with non-broadcasted update
+        if (updateFW->broadcasted && pkg.broadcasted) {
+          Log(DEBUG, "Out of sequence packet! We may have missed a packet?");
+          // Drop of out broadcasted mode
+          updateFW->broadcasted = false;
+          auto request = DataRequest::replyTo(pkg, updateFW->partNo);
+          request.broadcasted = false;
+          updateFW->task =
+              mesh.addTask(scheduler, 30 * TASK_SECOND, 10,
+                           [request, &mesh]() { mesh.sendPackage(&request); });
+          updateFW->task->setOnDisable([updateFW]() {
+            Log(ERROR, "OTA: Did not receive the requested data.\n");
+            updateFW->md5 = "";
+          });
+        }
       }
     }
     return false;
   });
+
 #endif
 }
 
@@ -456,4 +551,3 @@ void addReceivePackageCallback(Scheduler& scheduler, plugin::PackageHandler<T>& 
 }  // namespace painlessmesh
 
 #endif
-

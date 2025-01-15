@@ -1,7 +1,7 @@
 /**
- * Firebase TCP Client v1.0.2
+ * Firebase TCP Client v1.0.5
  *
- * Created September 14, 2023
+ * Created December 27, 2024
  *
  * The MIT License (MIT)
  * Copyright (c) 2022 K. Suwatchai (Mobizt)
@@ -32,7 +32,11 @@
 #include "./FB_Const.h"
 #include "./mbfs/MB_FS.h"
 #include "./FB_Utils.h"
+#if __has_include(<ESP_SSLClient.h>)
+#include <ESP_SSLClient.h>
+#else
 #include "./client/SSLClient/ESP_SSLClient.h"
+#endif
 #include "./FB_Network.h"
 
 #if defined(ESP32)
@@ -462,7 +466,7 @@ public:
     if (_client_type == firebase_client_type_external_generic_client &&
         (!_network_connection_cb || !_network_status_cb))
       rdy = false;
-    else if (_client_type != firebase_client_type_external_generic_client ||
+    else if (_client_type != firebase_client_type_external_generic_client &&
              _client_type != firebase_client_type_external_gsm_client)
       rdy = false;
 #else
@@ -845,6 +849,20 @@ public:
     return connect();
   }
 
+#if defined(ESP32_ARDUINO_CORE_CLIENT_CONNECT_HAS_TMO)
+  int connect(IPAddress ip, uint16_t port, int32_t timeout)
+  {
+    _tcp_client->setTimeout(timeout);
+    return connect(ip, port);
+  }
+
+  int connect(const char *host, uint16_t port, int32_t timeout)
+  {
+    _tcp_client->setTimeout(timeout);
+    return connect(host, port);
+  }
+#endif
+
   void setConfig(FirebaseConfig *config, MB_FS *mbfs)
   {
     _config = config;
@@ -867,7 +885,7 @@ public:
     return 0;
   }
 
-  void disconnect(){};
+  void disconnect() {};
 
   void keepAlive(int tcpKeepIdleSeconds, int tcpKeepIntervalSeconds, int tcpKeepCount)
   {
@@ -1007,6 +1025,7 @@ public:
         timeinfo.tm_min = min3;
         timeinfo.tm_sec = sec3;
         time_t ts = mktime(&timeinfo);
+        ts -= timezone * 3600;
         return ts;
       }
     }
