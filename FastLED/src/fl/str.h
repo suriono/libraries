@@ -37,7 +37,7 @@ FASTLED_SMART_PTR(StringHolder);
 
 class StringFormatter {
   public:
-    static void append(int val, StrN<64> *dst);
+    static void append(int32_t val, StrN<64> *dst);
     static bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
     static float parseFloat(const char *str, size_t len);
     static bool isDigit(char c) { return c >= '0' && c <= '9'; }
@@ -48,7 +48,10 @@ class StringHolder : public fl::Referent {
     StringHolder(const char *str);
     StringHolder(size_t length);
     StringHolder(const char *str, size_t length);
+    StringHolder(const StringHolder &other) = delete;
+    StringHolder &operator=(const StringHolder &other) = delete;
     ~StringHolder();
+
     bool isShared() const { return ref_count() > 1; }
     void grow(size_t newLength);
     bool hasCapacity(size_t newLength) const { return newLength <= mCapacity; }
@@ -87,9 +90,9 @@ template <size_t SIZE = 64> class StrN {
     template <size_t M> StrN(const StrN<M> &other) { copy(other); }
     StrN(const char *str) {
         size_t len = strlen(str);
-        mLength = len;
-        if (len + 1 <= SIZE) {
-            memcpy(mInlineData, str, len + 1);
+        mLength = len;  // Length is without null terminator
+        if (len + 1 <= SIZE) {  // Check capacity including null
+            memcpy(mInlineData, str, len + 1);  // Copy including null
             mHeapData.reset();
         } else {
             mHeapData = StringHolderPtr::New(str);
@@ -111,6 +114,14 @@ template <size_t SIZE = 64> class StrN {
             mHeapData.reset();
             mHeapData = StringHolderPtr::New(str);
         }
+    }
+
+    template<int N> StrN(const char (&str)[N]) {
+        copy(str, N-1);  // Subtract 1 to not count null terminator
+    }
+    template<int N> StrN &operator=(const char (&str)[N]) {
+        assign(str, N);
+        return *this;
     }
     StrN &operator=(const StrN &other) {
         copy(other);
@@ -159,11 +170,6 @@ template <size_t SIZE = 64> class StrN {
         return mHeapData ? mHeapData->capacity() : SIZE;
     }
 
-    size_t write(int n) {
-        StrN<64> dst;
-        StringFormatter::append(n, &dst); // Inlined size should suffice
-        return write(dst.c_str(), dst.size());
-    }
 
     size_t write(const uint8_t *data, size_t n) {
         const char *str = reinterpret_cast<const char *>(data);
@@ -208,12 +214,36 @@ template <size_t SIZE = 64> class StrN {
         return write(str, 1);
     }
 
+    size_t write(const uint16_t& n) {
+        StrN<64> dst;
+        StringFormatter::append(n, &dst); // Inlined size should suffice
+        return write(dst.c_str(), dst.size());
+    }
+
+    size_t write(const uint32_t& val) {
+        StrN<64> dst;
+        StringFormatter::append(val, &dst); // Inlined size should suffice
+        return write(dst.c_str(), dst.size());
+    }
+
+    size_t write(const int32_t& val) {
+        StrN<64> dst;
+        StringFormatter::append(val, &dst); // Inlined size should suffice
+        return write(dst.c_str(), dst.size());
+    }
+
+    size_t write(const int8_t val) {
+        StrN<64> dst;
+        StringFormatter::append(int16_t(val), &dst); // Inlined size should suffice
+        return write(dst.c_str(), dst.size());
+    }
+
     // Destructor
     ~StrN() {}
 
     // Accessors
     size_t size() const { return mLength; }
-    size_t length() const { return mLength; }
+    size_t length() const { return size(); }
     const char *c_str() const {
         return mHeapData ? mHeapData->data() : mInlineData;
     }
@@ -347,10 +377,43 @@ class Str : public StrN<FASTLED_STR_INLINED_SIZE> {
         return *this;
     }
 
+    bool operator>(const Str &other) const {
+        return strcmp(c_str(), other.c_str()) > 0;
+    }
+
+    bool operator>=(const Str &other) const {
+        return strcmp(c_str(), other.c_str()) >= 0;
+    }
+
+    bool operator<(const Str &other) const {
+        return strcmp(c_str(), other.c_str()) < 0;
+    }
+
+    bool operator<=(const Str &other) const {
+        return strcmp(c_str(), other.c_str()) <= 0;
+    }
+
+    bool operator==(const Str &other) const {
+        return strcmp(c_str(), other.c_str()) == 0;
+    }
+
+    bool operator!=(const Str &other) const {
+        return strcmp(c_str(), other.c_str()) != 0;
+    }
+
     Str& append(const char *str) { write(str, strlen(str)); return *this; }
     Str& append(const char *str, size_t len) { write(str, len); return *this; }
-    Str& append(char c) { write(&c, 1); return *this; }
-    Str& append(int n) { write(n); return *this; }
+    //Str& append(char c) { write(&c, 1); return *this; }
+    Str& append(const int8_t& c) {
+        const char* str = reinterpret_cast<const char*>(&c);
+        write(str, 1); return *this;
+    }
+    Str& append(const uint8_t& c) { write(uint16_t(c)); return *this; }
+    Str& append(const uint16_t& val) { write(val); return *this; }
+    Str& append(const int16_t& val) { write(uint32_t(val)); return *this; }
+    Str& append(const uint32_t& val) { write(val); return *this; }
+    Str& append(const int32_t& c) { write(c); return *this; }
+
     Str& append(const StrN &str) { write(str.c_str(), str.size()); return *this; }
 
 

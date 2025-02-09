@@ -22,8 +22,9 @@ dependencies = [
     "ninja",
     "cmake",
     "download",
-    "fastled>=1.2.12",
-    "playwright"
+    "fastled>=1.2.26",
+    "playwright",
+    "advanced-aicode"
 ]
 
 [build-system]

@@ -1,8 +1,107 @@
-FastLED 3.9.9 - Bug Fix
+FastLED 3.9.13 (Upcoming Release)
+==============
+* HD107(s) and HD mode are now availabe in FastLED.
+  * See example HD107.ino
+  * Exactly the same as the AP102 chipset, but with turbo 40-mhz.
+  * Keep in mind APA102 is under clocked by FastLED for long strip stability, due to a bug in the chipset. See more: https://forum.makerforums.info/t/hi-all-i-have-800-strip-lengths-of-apa-102-leds-running-off-a/58899/23
+* WS2816 has improved support for the ObjectFLED and Esp32 RMT5 drivers.
+  * Big thanks to https://github.com/kbob for all the PR's he's submitting to do this.
+* ESP32 Legacy RMT Driver
+  * Long standing espressif bug for RMT under high load has finally been fixed.
+  * Big thanks to https://github.com/Jueff for fixing it.
+  * A regression was fixed in getting the cpu clock cycles.
+  
+![image](https://github.com/user-attachments/assets/9684ab7d-2eaa-40df-a00d-0dff18098917)
+
+
+FastLED 3.9.12
+==============
+* WS2816 (high definition) chipset now supported.
+  * Thank you https://github.com/kbob for the code to do this!
+  * This is a 16-bit per channel LED that runs on the WS2812 protocol.
+  * 4-bit internal gamma correction on the chipset.
+    * 8-bit gamma correction from software + hardware is possible, but not implemented yet.
+    * Therefore this is a beta release of the driver that may see a color correction enhancement down the line.
+  * See example: https://github.com/FastLED/FastLED/blob/master/examples/WS2816/WS2816.ino
+* Apollo3 SPE LoRa Thing Plus expLoRaBLE now supported
+* ESP32-C3 - WS2812 Flicker when using WIFI / Interrupts is now fixed.
+  * This has always been a problem since before 3.9.X series.
+  * ESP32-C3 now is more stable than ESP32-S3 for the RMT controller because they can allocate much more memory per channel.
+  * If you are on the ESP32-S3, please try out the SPI controller if driving one strip, or use the new I2S driver if driving lots of strips.
+* ObjectFLED is now automatic for Teensy 4.0/4.1 for WS2812.
+  * To disable use `#define FASTLED_NOT_USES_OBJECTFLED` before `#include "FastLED.h"`
+* Fixes for RGBW emulated mode for SAMD (digit, due) chipsets.
+* AVR platforms will see a 22% shrinkage when using the APA102 and APA102-HD chipset.
+  * Uno Firmware (bytes) w/ APA102-HD (bytes):
+    * 3.9.11: 11787
+    * 3.9.12: 9243 (-22%)
+
+
+FastLED 3.9.11
+==============
+* Bug fix for the Teensy and ESP32S3 massive parallel drivers.
+  * Teensy ObjectFLED: Each led strip can now be a different length, see [examples](https://github.com/FastLED/FastLED/blob/master/examples/TeensyMassiveParallel/TeensyMassiveParallel.ino)
+  * ESP32 S3 I2S:
+    * The FastLED.addLeds(...) style api now works..
+      * Please note at this time that all 16 strips must be used. Not sure why this is. If anyone has clarification please reach out.
+    * RGBW support has been added externally via RGBW -> RGB data spoofing (same thing RGBW Emulated mode uses).
+    * Fixed compiliation issue for Arduino 2.3.4, which is missing some headers. In this case the driver will issue a warning that it will unavailable. 
+* Cross platform improvements for
+  * `FASTLED_DBG`
+  * `FASTLED_WARN`
+  * `FASTLED_ASSERT`
+
+
+FastLED 3.9.10
+==============
+* ESP32
+  * RMT5 driver has been fixed for ESP32-S3. Upto 4 RMT workers may work in parallel.
+    * Rebased espressifs led_strip to v3.0.0
+    * Unresolved issues:
+      * DMA does not work for ESP32-S3 for my test setup with XIAO ESP32-S3
+        * This appears to be an espressif bug as using dma is not tested in their examples and does not work with the stock driver, or there is something I don't understand.
+        * Therefore DMA is disable for now, force it on with
+          * `#define FASTLED_RMT_USE_DMA` 
+          * `#include "FastLED.h"`
+          * If anyone knows what's going on, please file a bug with FastLED [issues](https://github.com/FastLED/FastLED/issues/new) page.
+  * New WS2812 SPI driver for ESP32
+    * Enables the ESP32C2 device, as it does not have a I2S or RMT drivers.
+    * SPI is backed by DMA and is apparently more stable than the RMT driver.
+      * Unfortunately, the driver only works with the WS2812 protocol.
+    * I was able to test that ESP32-S3 was able to use two spi channels in parallel.
+    * You can enable this default via
+      * `#define FASTLED_ESP32_USE_CLOCKLESS_SPI`
+      * `#include "FastLED.h"
+    * Advanced users can enable both the RMT5 and SPI drivers if they are willing to manually construct the SPI driver and at it to the FastLED singleton object via `FastLED.addLeds<...>'
+    * If RMT is not present (ESP32C2) then the ClocklessSpiWS2812 driver will be enabled and selected automatically.
+* Teensy
+  * Massive Parallel - ObjectFLED clockless driver.
+    * Stability improvements with timing.
+    * Resolves issue with using ObjectFLED mode with Teensy Audio DMA.
+    * ObjectFLED driver is now rebased to version 1.1.0
+
+
+FastLED 3.9.9 - I2S For ESP32-S3
 =============
 * ESP32
-  * RMT5 no longer attempts to disable itself between draws (default mode).
+  * Yves's amazing I2S driver for ESP32S3 is available through fastled!
+    * 12 way parallel, I2S/LCD protocol.
+    * https://github.com/hpwit/I2SClockLessLedDriveresp32s3
+    * 12
+    * See the Esp32-S3-I2SDemo: https://github.com/FastLED/FastLED/blob/master/examples/Esp32S3I2SDemo/Esp32S3I2SDemo.ino
+      * Be mindful of the requirements, this driver requires psram to be enabled, which requires platformio or esp-idf to work. Instructions are in the example.
+      * There's no standard FastLED.add<....> api for this driver yet... But hopefully soon.
+  * RMT Green light being stuck on / Performance issues on the Wroom
+    * Traced it back to RMT disable/delete which puts the pin in floating input mode, which can false signal led colors. If you are affected by this, a weak pulldown resistor will also solve the issue.
+    * Fixed: FastLED no longer attempts to disable rmt between draws - once RMT mode is enabled it stay enabled.
+    * MAY fix wroom. If this doesn't fix it, just downgrade to RMT4 (sorry), or switch to a higher end chipset. I tested the driver at 6.5ms for 256 * 4 way parallel, which is the max performance on ESP32S3. It was flawless for me.
+  * Some internal cleanup. We are now header-stable with 4.0 release: few namespace / header changes from this release forward.
 
+Special thanks to Yves and the amazing work with the 12 way parallel driver. He's pushing the limits on what the ESP32-S3 is capabable of. No joke.
+
+If you are an absolute performance freak, check out Yves's advanced version of this driver with ~8x multiplexing through "turbo" I2S:
+
+https://github.com/hpwit/I2SClockLessLedVirtualDriveresp32s3
 
 FastLED 3.9.8 - FastLED now supports 27.5k pixels and more, on the Teensy 4.x
 =============
@@ -25,7 +124,7 @@ FastLED 3.9.8 - FastLED now supports 27.5k pixels and more, on the Teensy 4.x
   * Q/A:
     * Is anything else supported other than WS2812? - Not at this moment. As far as I know, all strips on this bulk controller **must** use the same
       timings. Because of the popularity of WS2812, it is enabled for this controller first. I will add support for other controllers based on the number of feature requests for other WS281x chipsets.
-    * Is overclocking supported? Yes, and it binds to the current overclock `#define FASTLED_LED_OVERCLOCK 1.2` @ a 20% overlock.
+    * Is overclocking supported? Yes, and it binds to the current overclock `#define FASTLED_OVERCLOCK 1.2` @ a 20% overlock.
     * Have you tested this? Very lightly in FastLED, but Kurt has done his own tests and FastLED just provides some wrappers to map it to our familiar and easy api.
     * How does this compare to the stock LED driver on Teensy for just one strip? Better and way less random light flashes. For some reason the stock Teensy WS2812 driver seems to produce glitches, but with the ObjectFLED driver seems to fix this.
     * Will this become the default driver on Teensy 4.x? Yes, in the next release, unless users report problems.
@@ -145,8 +244,8 @@ FastLED 3.9.2
   * In this version we introduce the pre-release of our WS2812 overclocking
   * We have compile fixes for 3.9.X
 * WS28XX family of led chipsets can now be overclocked
-  * See also define `FASTLED_LED_OVERCLOCK`
-    * Example: `#define FASTLED_LED_OVERCLOCK 1.2` (gives 20% overclock).
+  * See also define `FASTLED_OVERCLOCK`
+    * Example: `#define FASTLED_OVERCLOCK 1.2` (gives 20% overclock).
     * You can set this define before you include `"FastLED.h"`
     * Slower chips like AVR which do software bitbanging will ignore this.
     * This discovery came from this reddit thread:
@@ -171,7 +270,7 @@ FastLED 3.9.2
 Example of how to enable overclocking.
 
 ```
-#define FASTLED_LED_OVERCLOCK 1.2 // 20% overclock ~ 960 khz.
+#define FASTLED_OVERCLOCK 1.2 // 20% overclock ~ 960 khz.
 #include "FastLED.h"
 ```
 

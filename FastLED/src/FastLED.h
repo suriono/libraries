@@ -16,13 +16,13 @@
 /// * 1 digit for the major version
 /// * 3 digits for the minor version
 /// * 3 digits for the patch version
-#define FASTLED_VERSION 3009009
+#define FASTLED_VERSION 3009013
 #ifndef FASTLED_INTERNAL
 #  ifdef  FASTLED_SHOW_VERSION
 #    ifdef FASTLED_HAS_PRAGMA_MESSAGE
-#      pragma message "FastLED version 3.009.009"
+#      pragma message "FastLED version 3.009.013"
 #    else
-#      warning FastLED version 3.009.009  (Not really a warning, just telling you here.)
+#      warning FastLED version 3.009.013  (Not really a warning, just telling you here.)
 #    endif
 #  endif
 #endif
@@ -104,6 +104,9 @@ enum ESPIChipsets {
 	DOTSTAR,  ///< APA102 LED chipset alias
 	DOTSTARHD, ///< APA102HD LED chipset alias
 	APA102HD, ///< APA102 LED chipset with 5-bit gamma correction
+	HD107,  /// Same as APA102, but in turbo 40-mhz mode.
+	HD107HD,  /// Same as APA102HD, but in turbo 40-mhz mode.
+
 };
 
 /// Smart Matrix Library controller type
@@ -192,6 +195,10 @@ class WS2812 : public WS2812Controller800Khz<DATA_PIN, RGB_ORDER> {};
 /// @brief WS2815 controller class.
 template<uint8_t DATA_PIN, EOrder RGB_ORDER>
 class WS2815 : public WS2815Controller<DATA_PIN, RGB_ORDER> {};
+
+/// @brief WS2816 controller class.
+template <uint8_t DATA_PIN, EOrder RGB_ORDER>
+class WS2816 : public WS2816Controller<DATA_PIN, RGB_ORDER> {};
 
 /// @brief WS2852 controller class.
 /// @copydetails WS2812Controller800Khz
@@ -329,14 +336,6 @@ enum EBlockChipsets {
 #endif
 };
 
-#if defined(LIB8_ATTINY)
-#define NUM_CONTROLLERS 2
-#else
-/// Unknown NUM_CONTROLLERS definition. Unused elsewhere in the library?
-/// @todo Remove?
-#define NUM_CONTROLLERS 8
-#endif
-
 /// Typedef for a power consumption calculation function. Used within
 /// CFastLED for rescaling brightness before sending the LED data to
 /// the strip with CFastLED::show().
@@ -442,6 +441,9 @@ public:
 	// Both DOTSTARHD and APA102HD use the same controller class
 	_FL_MAP_CLOCKED_CHIPSET(DOTSTARHD, APA102ControllerHD)
 	_FL_MAP_CLOCKED_CHIPSET(APA102HD, APA102ControllerHD)
+
+	_FL_MAP_CLOCKED_CHIPSET(HD107, APA102Controller)
+	_FL_MAP_CLOCKED_CHIPSET(HD107HD, APA102ControllerHD)
 
 	_FL_MAP_CLOCKED_CHIPSET(SK9822, SK9822Controller)
 	_FL_MAP_CLOCKED_CHIPSET(SK9822HD, SK9822ControllerHD)

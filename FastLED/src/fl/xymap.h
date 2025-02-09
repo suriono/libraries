@@ -56,6 +56,7 @@ class XYMap {
           uint16_t offset = 0);
 
     XYMap(const XYMap &other) = default;
+    XYMap &operator=(const XYMap &other) = default;
 
     fl::ScreenMap toScreenMap() const;
 
@@ -72,9 +73,9 @@ class XYMap {
     uint16_t mapToIndex(uint16_t x, uint16_t y) const;
     uint16_t mapToIndex(int x, int y) const {
         if (x < 0) { x = 0; }
+        else if (uint16_t(x) >= width) { x = width - 1; }
         if (y < 0) { y = 0; }
-        if (x >= width) { x = width - 1; }
-        if (y >= height) { y = height - 1; }
+        else if (uint16_t(y) >= height) { y = height - 1; }
         return mapToIndex((uint16_t)x, (uint16_t)y);
     }
 

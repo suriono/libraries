@@ -23,12 +23,24 @@
 volatile uint32_t fuckit;
 #endif
 
+#ifndef FASTLED_DEFINE_WEAK_YEILD_FUNCTION
+#if defined(__AVR_ATtiny13__)
+// Arduino.h also defines this as a weak function on this platform.
+#define FASTLED_DEFINE_WEAK_YEILD_FUNCTION 0
+#else
+#define FASTLED_DEFINE_WEAK_YEILD_FUNCTION 1
+#endif
+#endif
+
 /// Has to be declared outside of any namespaces.
 /// Called at program exit when run in a desktop environment. 
 /// Extra C definition that some environments may need. 
 /// @returns 0 to indicate success
 extern "C" __attribute__((weak)) int atexit(void (* /*func*/ )()) { return 0; }
+
+#if FASTLED_DEFINE_WEAK_YEILD_FUNCTION 
 extern "C"  __attribute__((weak)) void yield(void) { }
+#endif
 
 FASTLED_NAMESPACE_BEGIN
 
@@ -106,16 +118,32 @@ void CFastLED::show(uint8_t scale) {
 	CLEDController *pCur = CLEDController::head();
 
 	while(pCur && length < MAX_CLED_CONTROLLERS) {
-		gControllersData[length++] = pCur->beginShowLeds(pCur->size());
+		if (pCur->getEnabled()) {
+			gControllersData[length] = pCur->beginShowLeds(pCur->size());
+		} else {
+			gControllersData[length] = nullptr;
+		}
+		length++;
 		if (m_nFPS < 100) { pCur->setDither(0); }
-		pCur->showLedsInternal(scale);
 		pCur = pCur->next();
+	}
+
+	pCur = CLEDController::head();
+	for (length = 0; length < MAX_CLED_CONTROLLERS && pCur; length++) {
+		if (pCur->getEnabled()) {
+			pCur->showLedsInternal(scale);
+		}
+		pCur = pCur->next();
+
 	}
 
 	length = 0;  // Reset length to 0 and iterate again.
 	pCur = CLEDController::head();
 	while(pCur && length < MAX_CLED_CONTROLLERS) {
-		pCur->endShowLeds(gControllersData[length++]);
+		if (pCur->getEnabled()) {
+			pCur->endShowLeds(gControllersData[length]);
+		}
+		length++;
 		pCur = pCur->next();
 	}
 	countFPS();
@@ -157,16 +185,31 @@ void CFastLED::showColor(const struct CRGB & color, uint8_t scale) {
 	int length = 0;
 	CLEDController *pCur = CLEDController::head();
 	while(pCur && length < MAX_CLED_CONTROLLERS) {
-		gControllersData[length++] = pCur->beginShowLeds(pCur->size());
+		if (pCur->getEnabled()) {
+			gControllersData[length] = pCur->beginShowLeds(pCur->size());
+		} else {
+			gControllersData[length] = nullptr;
+		}
+		length++;
+		pCur = pCur->next();
+	}
+
+	pCur = CLEDController::head();
+	while(pCur && length < MAX_CLED_CONTROLLERS) {
 		if(m_nFPS < 100) { pCur->setDither(0); }
-		pCur->showColorInternal(color, scale);
+		if (pCur->getEnabled()) {
+			pCur->showColorInternal(color, scale);
+		}
 		pCur = pCur->next();
 	}
 
 	pCur = CLEDController::head();
 	length = 0;  // Reset length to 0 and iterate again.
 	while(pCur && length < MAX_CLED_CONTROLLERS) {
-		pCur->endShowLeds(gControllersData[length++]);
+		if (pCur->getEnabled()) {
+			pCur->endShowLeds(gControllersData[length]);
+		}
+		length++;
 		pCur = pCur->next();
 	}
 	countFPS();

@@ -13,11 +13,11 @@ FASTLED_NAMESPACE_BEGIN
 fl::Str CRGB::toString() const {
     fl::Str out;
     out.append("CRGB(");
-    out.append(int(r));
-    out.append(", ");
-    out.append(int(g));
-    out.append(", ");
-    out.append(int(b));
+    out.append(int16_t(r));
+    out.append(",");
+    out.append(int16_t(g));
+    out.append(",");
+    out.append(int16_t(b));
     out.append(")");
     return out;
 }
@@ -54,5 +54,12 @@ CRGB CRGB::blend(const CRGB& p1, const CRGB& p2, fract8 amountOfP2) {
         blend8(p1.b, p2.b, amountOfP2)
     );
 }
+
+CRGB& CRGB::nscale8 (uint8_t scaledown )
+{
+    nscale8x3( r, g, b, scaledown);
+    return *this;
+}
+
 
 FASTLED_NAMESPACE_END

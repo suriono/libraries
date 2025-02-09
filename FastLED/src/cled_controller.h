@@ -46,6 +46,7 @@ protected:
     static CLEDController *m_pHead;  ///< pointer to the first LED controller in the linked list
     static CLEDController *m_pTail;  ///< pointer to the last LED controller in the linked list
 
+public:
 
     /// Set all the LEDs to a given color. 
     /// @param data the CRGB color to set the LEDs to
@@ -59,7 +60,6 @@ protected:
     /// @param scale the rgb scaling to apply to each led before writing it out
     virtual void show(const struct CRGB *data, int nLeds, uint8_t brightness) = 0;
 
-public:
 
     Rgbw mRgbMode = RgbwInvalid::value();
     CLEDController& setRgbw(const Rgbw& arg = RgbwDefault::value()) {
@@ -70,6 +70,7 @@ public:
     }
 
     void setEnabled(bool enabled) { m_enabled = enabled; }
+    bool getEnabled() { return m_enabled; }
 
     CLEDController();
     // If we added virtual to the AVR boards then we are going to add 600 bytes of memory to the binary
@@ -257,7 +258,7 @@ public:
     /// @copydoc setTemperature()
     CLEDController & setTemperature(ColorTemperature temperature) { m_ColorTemperature = temperature; return *this; }
 
-    /// Get the color temperature, aka whipe point, for this controller
+    /// Get the color temperature, aka white point, for this controller
     /// @returns the current color temperature (CLEDController::m_ColorTemperature)
     CRGB getTemperature() { return m_ColorTemperature; }
 
