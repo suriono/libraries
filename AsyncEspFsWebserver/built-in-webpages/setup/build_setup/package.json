@@ -2,7 +2,7 @@
   "dependencies": {
     "@gfx/zopfli": "^1.0.15",
     "@node-minify/core": "^7.1.0",
-    "@node-minify/cssnano": "^7.1.0",
+    "@node-minify/cssnano": "^10.3.0",
     "@node-minify/csso": "^7.1.0",
     "@node-minify/html-minifier": "^7.1.0",
     "@node-minify/terser": "^7.1.0"
