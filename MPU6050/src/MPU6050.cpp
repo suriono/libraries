@@ -66,10 +66,8 @@ void MPU6050_Base::initialize() {
     setClockSource(MPU6050_CLOCK_PLL_XGYRO);
 
     setFullScaleGyroRange(MPU6050_GYRO_FS_250);
-    gyroscopeResolution = 250.0 / 16384.0;
 
     setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
-    accelerationResolution = 2.0 / 16384.0;
 
     setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
 }
@@ -92,54 +90,44 @@ void MPU6050_Base::initialize(ACCEL_FS accelRange, GYRO_FS gyroRange) {
     {
     case ACCEL_FS::A2G:
         setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
-        accelerationResolution = 2.0 / 16384.0;
 	break;
 
     case ACCEL_FS::A4G:
         setFullScaleAccelRange(MPU6050_ACCEL_FS_4);
-        accelerationResolution = 4.0 / 16384.0;
 	break;
 
     case ACCEL_FS::A8G:
         setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
-        accelerationResolution = 8.0 / 16384.0;
 	break;
 
     case ACCEL_FS::A16G:
         setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
-        accelerationResolution = 16.0 / 16384.0;
 	break;
     default:
       Serial.println("Init accelRange not valid, setting maximum accel range");
       setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
-      accelerationResolution = 16.0 / 16384.0;
     }
 
     switch (gyroRange) 
     {
     case GYRO_FS::G250DPS:
         setFullScaleGyroRange(MPU6050_GYRO_FS_250);
-        gyroscopeResolution = 250.0 / 16384.0;
 	break;
 
     case GYRO_FS::G500DPS:
         setFullScaleGyroRange(MPU6050_GYRO_FS_500);
-        gyroscopeResolution = 500.0 / 16384.0;
 	break;
 
     case GYRO_FS::G1000DPS:
         setFullScaleGyroRange(MPU6050_GYRO_FS_1000);
-        gyroscopeResolution = 1000.0 / 16384.0;
 	break;
 
     case GYRO_FS::G2000DPS:
         setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
-        gyroscopeResolution = 2000.0 / 16384.0;
 	break;
     default:
       Serial.println("Init gyroRange not valid, setting maximum gyro range");
       setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
-      gyroscopeResolution = 2000.0 / 16384.0;
     }
 
     setSleepEnabled(false); // thanks to Jack Elston for pointing this one out!
@@ -163,7 +151,7 @@ float MPU6050_Base::get_gyro_resolution() {
  */
 bool MPU6050_Base::testConnection() {
   uint8_t deviceId = getDeviceID();
-  return (deviceId == 0x34) || (deviceId == 0xC);
+  return (deviceId == 0x34) || (deviceId == 0xC) || (deviceId == 0x3A);
 }
 
 // AUX_VDDIO register (InvenSense demo code calls this RA_*G_OFFS_TC)
@@ -341,6 +329,27 @@ uint8_t MPU6050_Base::getFullScaleGyroRange() {
  * @see MPU6050_GCONFIG_FS_SEL_LENGTH
  */
 void MPU6050_Base::setFullScaleGyroRange(uint8_t range) {
+    
+    switch(range) {
+        case MPU6050_GYRO_FS_250:
+            gyroscopeResolution = 250.0 / 32768.0;
+        break;
+        case MPU6050_GYRO_FS_500:
+            gyroscopeResolution = 500.0 / 32768.0;
+        break;
+        case MPU6050_GYRO_FS_1000:
+            gyroscopeResolution = 1000.0 / 32768.0;
+        break;
+        case MPU6050_GYRO_FS_2000:
+            gyroscopeResolution = 2000.0 / 32768.0;
+        break;
+        default:
+            Serial.println("Init gyroRange not valid, setting maximum gyro range");
+            range = MPU6050_GYRO_FS_2000;
+            gyroscopeResolution = 2000.0 / 32768.0;
+        break;
+    }
+    
     I2Cdev::writeBits(devAddr, MPU6050_RA_GYRO_CONFIG, MPU6050_GCONFIG_FS_SEL_BIT, MPU6050_GCONFIG_FS_SEL_LENGTH, range, wireObj);
 }
 
@@ -475,6 +484,27 @@ uint8_t MPU6050_Base::getFullScaleAccelRange() {
  * @see getFullScaleAccelRange()
  */
 void MPU6050_Base::setFullScaleAccelRange(uint8_t range) {
+    
+    switch(range) {
+        case MPU6050_ACCEL_FS_2:
+            accelerationResolution = 2.0 / 32768.0;
+        break;
+        case MPU6050_ACCEL_FS_4:
+            accelerationResolution = 4.0 / 32768.0;
+        break;
+        case MPU6050_ACCEL_FS_8:
+            accelerationResolution = 8.0 / 32768.0;
+        break;
+        case MPU6050_ACCEL_FS_16:
+            accelerationResolution = 16.0 / 32768.0;
+        break;
+        default:
+            Serial.println("Init accelRange not valid, setting maximum accel range");
+            range = MPU6050_ACCEL_FS_16;
+            accelerationResolution = 16.0 / 32768.0;
+        break;
+    }
+    
     I2Cdev::writeBits(devAddr, MPU6050_RA_ACCEL_CONFIG, MPU6050_ACONFIG_AFS_SEL_BIT, MPU6050_ACONFIG_AFS_SEL_LENGTH, range, wireObj);
 }
 /** Get the high-pass filter configuration.
@@ -3415,7 +3445,7 @@ void MPU6050_Base::PID(uint8_t ReadAddress, float kP,float kI, uint8_t Loops){
 	int16_t eSample;
 	uint32_t eSum;
 	uint16_t gravity = 8192; // prevent uninitialized compiler warning
-	if (ReadAddress == 0x3B) gravity = 16384 >> getFullScaleAccelRange();
+	if (ReadAddress == 0x3B) gravity = 32768 >> getFullScaleAccelRange();
 	Serial.write('>');
 	for (int i = 0; i < 3; i++) {
 		I2Cdev::readWords(devAddr, SaveAddress + (i * shift), 1, (uint16_t *)&Data, I2Cdev::readTimeout, wireObj); // reads 1 or more 16 bit integers (Word)

@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright 2016-2025 Hristo Gochkov, Mathieu Carbou, Emil Muratov
+// Copyright 2016-2026 Hristo Gochkov, Mathieu Carbou, Emil Muratov, Will Miles
 
-#ifndef ASYNCWEBSOCKET_H_
-#define ASYNCWEBSOCKET_H_
+#pragma once
 
 #include <Arduino.h>
-#ifdef ESP32
+
+#if defined(ESP32) || defined(LIBRETINY)
 #include <AsyncTCP.h>
+#ifdef LIBRETINY
+#ifdef round
+#undef round
+#endif
+#endif
 #include <mutex>
 #ifndef WS_MAX_QUEUED_MESSAGES
 #define WS_MAX_QUEUED_MESSAGES 32
@@ -16,15 +21,19 @@
 #ifndef WS_MAX_QUEUED_MESSAGES
 #define WS_MAX_QUEUED_MESSAGES 8
 #endif
-#elif defined(TARGET_RP2040)
-#include <AsyncTCP_RP2040W.h>
+#elif defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
+#include <RPAsyncTCP.h>
 #ifndef WS_MAX_QUEUED_MESSAGES
 #define WS_MAX_QUEUED_MESSAGES 32
 #endif
 #endif
 
 #include <ESPAsyncWebServer.h>
+#include <AsyncWebServerLogging.h>
 
+#include <cstdio>
+#include <deque>
+#include <list>
 #include <memory>
 
 #ifdef ESP8266
@@ -47,7 +56,60 @@ using AsyncWebSocketSharedBuffer = std::shared_ptr<std::vector<uint8_t>>;
 class AsyncWebSocket;
 class AsyncWebSocketResponse;
 class AsyncWebSocketClient;
-class AsyncWebSocketControl;
+
+/*
+ * Control Frame
+ */
+
+class AsyncWebSocketControl {
+private:
+  uint8_t _opcode;
+  uint8_t *_data;
+  size_t _len;
+  bool _mask;
+  bool _finished;
+
+public:
+  AsyncWebSocketControl(uint8_t opcode, const uint8_t *data = NULL, size_t len = 0, bool mask = false)
+    : _opcode(opcode), _len(len), _mask(len && mask), _finished(false) {
+    if (data == NULL) {
+      _len = 0;
+    }
+    if (_len) {
+      if (_len > 125) {
+        _len = 125;
+      }
+
+      _data = (uint8_t *)malloc(_len);
+
+      if (_data == NULL) {
+        async_ws_log_e("Failed to allocate");
+        _len = 0;
+      } else {
+        memcpy(_data, data, len);
+      }
+    } else {
+      _data = NULL;
+    }
+  }
+
+  ~AsyncWebSocketControl() {
+    if (_data != NULL) {
+      free(_data);
+    }
+  }
+
+  bool finished() const {
+    return _finished;
+  }
+  uint8_t opcode() {
+    return _opcode;
+  }
+  uint8_t len() {
+    return _len + 2;
+  }
+  size_t send(AsyncClient *client);
+};
 
 typedef struct {
   /** Message type as defined by enum AwsFrameType.
@@ -151,18 +213,17 @@ private:
   AsyncWebSocket *_server;
   uint32_t _clientId;
   AwsClientStatus _status;
+  uint8_t _pstate;
+  uint32_t _lastMessageTime;
+  uint32_t _keepAlivePeriod;
 #ifdef ESP32
-  mutable std::mutex _lock;
+  mutable std::recursive_mutex _lock;
 #endif
   std::deque<AsyncWebSocketControl> _controlQueue;
   std::deque<AsyncWebSocketMessage> _messageQueue;
   bool closeWhenFull = true;
 
-  uint8_t _pstate;
   AwsFrameInfo _pinfo;
-
-  uint32_t _lastMessageTime;
-  uint32_t _keepAlivePeriod;
 
   bool _queueControl(uint8_t opcode, const uint8_t *data = NULL, size_t len = 0, bool mask = false);
   bool _queueMessage(AsyncWebSocketSharedBuffer buffer, uint8_t opcode = WS_TEXT, bool mask = false);
@@ -172,7 +233,15 @@ private:
 public:
   void *_tempObject;
 
-  AsyncWebSocketClient(AsyncWebServerRequest *request, AsyncWebSocket *server);
+  AsyncWebSocketClient(AsyncClient *client, AsyncWebSocket *server);
+
+  /**
+   * @brief Construct a new Async Web Socket Client object
+   * @note constructor would take the ownership of of AsyncTCP's client pointer from `request` parameter and call delete on it!
+   * @param request
+   * @param server
+   */
+  AsyncWebSocketClient(AsyncWebServerRequest *request, AsyncWebSocket *server) : AsyncWebSocketClient(request->clientRelease(), server){};
   ~AsyncWebSocketClient();
 
   // client id increments for the given server
@@ -291,7 +360,7 @@ private:
   String _url;
   std::list<AsyncWebSocketClient> _clients;
   uint32_t _cNextId;
-  AwsEventHandler _eventHandler{nullptr};
+  AwsEventHandler _eventHandler;
   AwsHandshakeHandler _handshakeHandler;
   bool _enabled;
 #ifdef ESP32
@@ -305,8 +374,8 @@ public:
     PARTIALLY_ENQUEUED = 2,
   } SendStatus;
 
-  explicit AsyncWebSocket(const char *url) : _url(url), _cNextId(1), _enabled(true) {}
-  AsyncWebSocket(const String &url) : _url(url), _cNextId(1), _enabled(true) {}
+  explicit AsyncWebSocket(const char *url, AwsEventHandler handler = nullptr) : _url(url), _cNextId(1), _eventHandler(handler), _enabled(true) {}
+  AsyncWebSocket(const String &url, AwsEventHandler handler = nullptr) : _url(url), _cNextId(1), _eventHandler(handler), _enabled(true) {}
   ~AsyncWebSocket(){};
   const char *url() const {
     return _url.c_str();
@@ -385,9 +454,10 @@ public:
     return _cNextId++;
   }
   AsyncWebSocketClient *_newClient(AsyncWebServerRequest *request);
+  void _handleDisconnect(AsyncWebSocketClient *client);
   void _handleEvent(AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len);
-  bool canHandle(AsyncWebServerRequest *request) const override final;
-  void handleRequest(AsyncWebServerRequest *request) override final;
+  bool canHandle(AsyncWebServerRequest *request) const final;
+  void handleRequest(AsyncWebServerRequest *request) final;
 
   //  messagebuffer functions/objects.
   AsyncWebSocketMessageBuffer *makeBuffer(size_t size = 0);
@@ -403,14 +473,99 @@ class AsyncWebSocketResponse : public AsyncWebServerResponse {
 private:
   String _content;
   AsyncWebSocket *_server;
+  AsyncWebServerRequest *_request;
+  // this call back will switch AsyncTCP client to WebSocket
+  void _switchClient();
 
 public:
   AsyncWebSocketResponse(const String &key, AsyncWebSocket *server);
   void _respond(AsyncWebServerRequest *request);
-  size_t _ack(AsyncWebServerRequest *request, size_t len, uint32_t time);
+  size_t _ack(AsyncWebServerRequest *request, size_t len, uint32_t time) override {
+    return 0;
+  };
   bool _sourceValid() const {
     return true;
   }
 };
 
-#endif /* ASYNCWEBSOCKET_H_ */
+class AsyncWebSocketMessageHandler {
+public:
+  AwsEventHandler eventHandler() const {
+    return _handler;
+  }
+
+  void onConnect(std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client)> onConnect) {
+    _onConnect = onConnect;
+  }
+
+  void onDisconnect(std::function<void(AsyncWebSocket *server, uint32_t clientId)> onDisconnect) {
+    _onDisconnect = onDisconnect;
+  }
+
+  /**
+   * Error callback
+   * @param reason null-terminated string
+   * @param len length of the string
+   */
+  void onError(std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client, uint16_t errorCode, const char *reason, size_t len)> onError) {
+    _onError = onError;
+  }
+
+  /**
+   * Complete message callback
+   * @param data pointer to the data (binary or null-terminated string). This handler expects the user to know which data type he uses.
+   */
+  void onMessage(std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client, const uint8_t *data, size_t len)> onMessage) {
+    _onMessage = onMessage;
+  }
+
+  /**
+   * Fragmented message callback
+   * @param data pointer to the data (binary or null-terminated string), will be null-terminated. This handler expects the user to know which data type he uses.
+   */
+  // clang-format off
+  void onFragment(std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client, const AwsFrameInfo *frameInfo, const uint8_t *data, size_t len)> onFragment) {
+    _onFragment = onFragment;
+  }
+  // clang-format on
+
+private:
+  // clang-format off
+  std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client)> _onConnect;
+  std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client, uint16_t errorCode, const char *reason, size_t len)> _onError;
+  std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client, const uint8_t *data, size_t len)> _onMessage;
+  std::function<void(AsyncWebSocket *server, AsyncWebSocketClient *client, const AwsFrameInfo *frameInfo, const uint8_t *data, size_t len)> _onFragment;
+  std::function<void(AsyncWebSocket *server, uint32_t clientId)> _onDisconnect;
+  // clang-format on
+
+  // this handler is meant to only support 1-frame messages (== unfragmented messages)
+  AwsEventHandler _handler = [this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+    if (type == WS_EVT_CONNECT) {
+      if (_onConnect) {
+        _onConnect(server, client);
+      }
+    } else if (type == WS_EVT_DISCONNECT) {
+      if (_onDisconnect) {
+        _onDisconnect(server, client->id());
+      }
+    } else if (type == WS_EVT_ERROR) {
+      if (_onError) {
+        _onError(server, client, *((uint16_t *)arg), (const char *)data, len);
+      }
+    } else if (type == WS_EVT_DATA) {
+      AwsFrameInfo *info = (AwsFrameInfo *)arg;
+      if (info->opcode == WS_TEXT) {
+        data[len] = 0;
+      }
+      if (info->final && info->index == 0 && info->len == len) {
+        if (_onMessage) {
+          _onMessage(server, client, data, len);
+        }
+      } else {
+        if (_onFragment) {
+          _onFragment(server, client, info, data, len);
+        }
+      }
+    }
+  };
+};

@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright 2016-2025 Hristo Gochkov, Mathieu Carbou, Emil Muratov
+// Copyright 2016-2026 Hristo Gochkov, Mathieu Carbou, Emil Muratov, Will Miles
 
 #include "ESPAsyncWebServer.h"
 #include "WebAuthentication.h"
 #include "WebResponseImpl.h"
-#include "literals.h"
-#include <cstring>
+#include "AsyncWebServerLogging.h"
 
-#define __is_param_char(c) ((c) && ((c) != '{') && ((c) != '[') && ((c) != '&') && ((c) != '='))
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <utility>
+
+#include "./literals.h"
+
+static inline bool isParamChar(char c) {
+  return ((c) && ((c) != '{') && ((c) != '[') && ((c) != '&') && ((c) != '='));
+}
 
 static void doNotDelete(AsyncWebServerRequest *) {}
 
@@ -22,78 +30,74 @@ enum {
 };
 
 AsyncWebServerRequest::AsyncWebServerRequest(AsyncWebServer *s, AsyncClient *c)
-  : _client(c), _server(s), _handler(NULL), _response(NULL), _temp(), _parseState(PARSE_REQ_START), _version(0), _method(HTTP_ANY), _url(), _host(),
-    _contentType(), _boundary(), _authorization(), _reqconntype(RCT_HTTP), _authMethod(AsyncAuthType::AUTH_NONE), _isMultipart(false), _isPlainPost(false),
-    _expectingContinue(false), _contentLength(0), _parsedLength(0), _multiParseState(0), _boundaryPosition(0), _itemStartIndex(0), _itemSize(0), _itemName(),
-    _itemFilename(), _itemType(), _itemValue(), _itemBuffer(0), _itemBufferIndex(0), _itemIsFile(false), _tempObject(NULL) {
+  : _client(c), _server(s), _handler(NULL), _response(NULL), _onDisconnectfn(NULL), _temp(), _parseState(PARSE_REQ_START), _version(0), _method(HTTP_ANY),
+    _url(), _host(), _contentType(), _boundary(), _authorization(), _reqconntype(RCT_HTTP), _authMethod(AsyncAuthType::AUTH_NONE), _isMultipart(false),
+    _isPlainPost(false), _expectingContinue(false), _contentLength(0), _parsedLength(0), _multiParseState(0), _boundaryPosition(0), _itemStartIndex(0),
+    _itemSize(0), _itemName(), _itemFilename(), _itemType(), _itemValue(), _itemBuffer(0), _itemBufferIndex(0), _itemIsFile(false), _tempObject(NULL) {
   c->onError(
     [](void *r, AsyncClient *c, int8_t error) {
       (void)c;
-      // log_e("AsyncWebServerRequest::_onError");
-      AsyncWebServerRequest *req = (AsyncWebServerRequest *)r;
-      req->_onError(error);
+      // async_ws_log_e("AsyncWebServerRequest::_onError");
+      static_cast<AsyncWebServerRequest *>(r)->_onError(error);
     },
     this
   );
   c->onAck(
     [](void *r, AsyncClient *c, size_t len, uint32_t time) {
       (void)c;
-      // log_e("AsyncWebServerRequest::_onAck");
-      AsyncWebServerRequest *req = (AsyncWebServerRequest *)r;
-      req->_onAck(len, time);
+      // async_ws_log_e("AsyncWebServerRequest::_onAck");
+      static_cast<AsyncWebServerRequest *>(r)->_onAck(len, time);
     },
     this
   );
   c->onDisconnect(
     [](void *r, AsyncClient *c) {
-      // log_e("AsyncWebServerRequest::_onDisconnect");
-      AsyncWebServerRequest *req = (AsyncWebServerRequest *)r;
-      req->_onDisconnect();
-      delete c;
+      // async_ws_log_e("AsyncWebServerRequest::_onDisconnect");
+      static_cast<AsyncWebServerRequest *>(r)->_onDisconnect();
     },
     this
   );
   c->onTimeout(
     [](void *r, AsyncClient *c, uint32_t time) {
       (void)c;
-      // log_e("AsyncWebServerRequest::_onTimeout");
-      AsyncWebServerRequest *req = (AsyncWebServerRequest *)r;
-      req->_onTimeout(time);
+      // async_ws_log_e("AsyncWebServerRequest::_onTimeout");
+      static_cast<AsyncWebServerRequest *>(r)->_onTimeout(time);
     },
     this
   );
   c->onData(
     [](void *r, AsyncClient *c, void *buf, size_t len) {
       (void)c;
-      // log_e("AsyncWebServerRequest::_onData");
-      AsyncWebServerRequest *req = (AsyncWebServerRequest *)r;
-      req->_onData(buf, len);
+      // async_ws_log_e("AsyncWebServerRequest::_onData");
+      static_cast<AsyncWebServerRequest *>(r)->_onData(buf, len);
     },
     this
   );
   c->onPoll(
     [](void *r, AsyncClient *c) {
       (void)c;
-      // log_e("AsyncWebServerRequest::_onPoll");
-      AsyncWebServerRequest *req = (AsyncWebServerRequest *)r;
-      req->_onPoll();
+      // async_ws_log_e("AsyncWebServerRequest::_onPoll");
+      static_cast<AsyncWebServerRequest *>(r)->_onPoll();
     },
     this
   );
 }
 
 AsyncWebServerRequest::~AsyncWebServerRequest() {
-  // log_e("AsyncWebServerRequest::~AsyncWebServerRequest");
+  if (_client) {
+    // usually it is _client's disconnect triggers object destruct, but for completeness we define behavior
+    // if for some reason *this will be destructed while client is still connected
+    _client->onDisconnect(nullptr);
+    delete _client;
+    _client = nullptr;
+  }
+
+  if (_response) {
+    delete _response;
+    _response = nullptr;
+  }
 
   _this.reset();
-
-  _headers.clear();
-
-  _pathParams.clear();
-
-  AsyncWebServerResponse *r = _response;
-  _response = NULL;
-  delete r;
 
   if (_tempObject != NULL) {
     free(_tempObject);
@@ -112,9 +116,7 @@ void AsyncWebServerRequest::_onData(void *buf, size_t len) {
   // SSL/TLS handshake detection
 #ifndef ASYNC_TCP_SSL_ENABLED
   if (_parseState == PARSE_REQ_START && len && ((uint8_t *)buf)[0] == 0x16) {  // 0x16 indicates a Handshake message (SSL/TLS).
-#ifdef ESP32
-    log_d("SSL/TLS handshake detected: resetting connection");
-#endif
+    async_ws_log_d("SSL/TLS handshake detected: resetting connection");
     _parseState = PARSE_REQ_FAIL;
     abort();
     return;
@@ -142,9 +144,7 @@ void AsyncWebServerRequest::_onData(void *buf, size_t len) {
         char ch = str[len - 1];
         str[len - 1] = 0;
         if (!_temp.reserve(_temp.length() + len)) {
-#ifdef ESP32
-          log_e("Failed to allocate");
-#endif
+          async_ws_log_e("Failed to allocate");
           _parseState = PARSE_REQ_FAIL;
           abort();
           return;
@@ -167,6 +167,8 @@ void AsyncWebServerRequest::_onData(void *buf, size_t len) {
       // A handler should be already attached at this point in _parseLine function.
       // If handler does nothing (_onRequest is NULL), we don't need to really parse the body.
       const bool needParse = _handler && !_handler->isRequestHandlerTrivial();
+      // Discard any bytes after content length; handlers may overrun their buffers
+      len = std::min(len, _contentLength - _parsedLength);
       if (_isMultipart) {
         if (needParse) {
           size_t i;
@@ -181,9 +183,12 @@ void AsyncWebServerRequest::_onData(void *buf, size_t len) {
         if (_parsedLength == 0) {
           if (_contentType.startsWith(T_app_xform_urlencoded)) {
             _isPlainPost = true;
-          } else if (_contentType == T_text_plain && __is_param_char(((char *)buf)[0])) {
+          } else if (_contentType == T_text_plain && isParamChar(((char *)buf)[0])) {
             size_t i = 0;
-            while (i < len && __is_param_char(((char *)buf)[i++]));
+            char ch;
+            do {
+              ch = ((char *)buf)[i];
+            } while (i++ < len && isParamChar(ch));
             if (i < len && ((char *)buf)[i - 1] == '=') {
               _isPlainPost = true;
             }
@@ -217,31 +222,26 @@ void AsyncWebServerRequest::_onData(void *buf, size_t len) {
 
 void AsyncWebServerRequest::_onPoll() {
   // os_printf("p\n");
-  if (_response != NULL && _client != NULL && _client->canSend()) {
-    if (!_response->_finished()) {
-      _response->_ack(this, 0, 0);
-    } else {
-      AsyncWebServerResponse *r = _response;
-      _response = NULL;
-      delete r;
-
-      _client->close();
-    }
+  if (_response && _client && _client->canSend()) {
+    _response->_ack(this, 0, 0);
   }
 }
 
 void AsyncWebServerRequest::_onAck(size_t len, uint32_t time) {
   // os_printf("a:%u:%u\n", len, time);
-  if (_response != NULL) {
-    if (!_response->_finished()) {
-      _response->_ack(this, len, time);
-    } else if (_response->_finished()) {
-      AsyncWebServerResponse *r = _response;
-      _response = NULL;
-      delete r;
+  if (!_response) {
+    return;
+  }
 
-      _client->close();
+  if (!_response->_finished()) {
+    _response->_ack(this, len, time);
+    // recheck if response has just completed, close connection
+    if (_response->_finished()) {
+      _client->close();  // this will trigger _onDisconnect() and object destruction
     }
+  } else {
+    // this will close responses that were complete via a single _send() call
+    _client->close();  // this will trigger _onDisconnect() and object destruction
   }
 }
 
@@ -265,10 +265,6 @@ void AsyncWebServerRequest::_onDisconnect() {
     _onDisconnectfn();
   }
   _server->_handleDisconnect(this);
-}
-
-void AsyncWebServerRequest::_addPathParam(const char *p) {
-  _pathParams.emplace_back(p);
 }
 
 void AsyncWebServerRequest::_addGetParams(const String &params) {
@@ -339,10 +335,10 @@ bool AsyncWebServerRequest::_parseReqHead() {
 }
 
 bool AsyncWebServerRequest::_parseReqHeader() {
-  int index = _temp.indexOf(':');
-  if (index) {
-    String name(_temp.substring(0, index));
-    String value(_temp.substring(index + 2));
+  AsyncWebHeader header = AsyncWebHeader::parse(_temp);
+  if (header) {
+    const String &name = header.name();
+    const String &value = header.value();
     if (name.equalsIgnoreCase(T_Host)) {
       _host = value;
     } else if (name.equalsIgnoreCase(T_Content_Type)) {
@@ -390,13 +386,13 @@ bool AsyncWebServerRequest::_parseReqHeader() {
         _reqconntype = RCT_EVENT;
       }
     }
-    _headers.emplace_back(name, value);
+    _headers.emplace_back(std::move(header));
   }
-#ifndef TARGET_RP2040
-  _temp.clear();
-#else
+#if defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350) || defined(LIBRETINY)
   // Ancient PRI core does not have String::clear() method 8-()
   _temp = emptyString;
+#else
+  _temp.clear();
 #endif
   return true;
 }
@@ -417,11 +413,11 @@ void AsyncWebServerRequest::_parsePlainPostChar(uint8_t data) {
       _params.emplace_back(name, urlDecode(value), true);
     }
 
-#ifndef TARGET_RP2040
-    _temp.clear();
-#else
+#if defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350) || defined(LIBRETINY)
     // Ancient PRI core does not have String::clear() method 8-()
     _temp = emptyString;
+#else
+    _temp.clear();
 #endif
   }
 }
@@ -524,6 +520,16 @@ void AsyncWebServerRequest::_parseMultipartPostByte(uint8_t data, bool last) {
             _itemFilename = nameVal;
             _itemIsFile = true;
           }
+          // Add the parameters from the content-disposition header to the param list, flagged as POST and File,
+          // so that they can be retrieved using getParam(name, isPost=true, isFile=true)
+          // in the upload handler to correctly handle multiple file uploads within the same request.
+          // Example: Content-Disposition: form-data; name="fw"; filename="firmware.bin"
+          // See: https://github.com/ESP32Async/ESPAsyncWebServer/discussions/328
+          if (_itemIsFile && _itemName.length() && _itemFilename.length()) {
+            // add new parameters for this content-disposition
+            _params.emplace_back(T_name, _itemName, true, true);
+            _params.emplace_back(T_filename, _itemFilename, true, true);
+          }
         }
         _temp = emptyString;
       } else {
@@ -538,9 +544,7 @@ void AsyncWebServerRequest::_parseMultipartPostByte(uint8_t data, bool last) {
           }
           _itemBuffer = (uint8_t *)malloc(RESPONSE_STREAM_BUFFER_SIZE);
           if (_itemBuffer == NULL) {
-#ifdef ESP32
-            log_e("Failed to allocate");
-#endif
+            async_ws_log_e("Failed to allocate");
             _multiParseState = PARSE_ERROR;
             abort();
             return;
@@ -594,13 +598,15 @@ void AsyncWebServerRequest::_parseMultipartPostByte(uint8_t data, bool last) {
       if (!_itemIsFile) {
         _params.emplace_back(_itemName, _itemValue, true);
       } else {
-        if (_itemSize) {
-          if (_handler) {
-            _handler->handleUpload(this, _itemFilename, _itemSize - _itemBufferIndex, _itemBuffer, _itemBufferIndex, true);
-          }
-          _itemBufferIndex = 0;
-          _params.emplace_back(_itemName, _itemFilename, true, true, _itemSize);
+        if (_handler) {
+          _handler->handleUpload(this, _itemFilename, _itemSize - _itemBufferIndex, _itemBuffer, _itemBufferIndex, true);
         }
+        _itemBufferIndex = 0;
+        _params.emplace_back(_itemName, _itemFilename, true, true, _itemSize);
+        // remove previous occurrence(s) of content-disposition parameters for this upload
+        _params.remove_if([this](const AsyncWebParameter &p) {
+          return p.isPost() && p.isFile() && (p.name() == T_name || p.name() == T_filename);
+        });
         free(_itemBuffer);
         _itemBuffer = NULL;
       }
@@ -705,7 +711,7 @@ void AsyncWebServerRequest::_runMiddlewareChain() {
 
 void AsyncWebServerRequest::_send() {
   if (!_sent && !_paused) {
-    // log_d("AsyncWebServerRequest::_send()");
+    // async_ws_log_d("AsyncWebServerRequest::_send()");
 
     // user did not create a response ?
     if (!_response) {
@@ -717,7 +723,7 @@ void AsyncWebServerRequest::_send() {
       send(500, T_text_plain, "Invalid data in handler");
     }
 
-    // here, we either have a response give nfrom user or one of the two above
+    // here, we either have a response given from user or one of the two above
     _client->setRxTimeout(0);
     _response->_respond(this);
     _sent = true;
@@ -741,7 +747,7 @@ void AsyncWebServerRequest::abort() {
     _sent = true;
     _paused = false;
     _this.reset();
-    // log_e("AsyncWebServerRequest::abort");
+    // async_ws_log_e("AsyncWebServerRequest::abort");
     _client->abort();
   }
 }
@@ -995,15 +1001,13 @@ void AsyncWebServerRequest::requestAuthentication(AsyncAuthType method, const ch
     case AsyncAuthType::AUTH_BASIC:
     {
       String header;
-      if (header.reserve(strlen(T_BASIC_REALM) + strlen(realm) + 1)) {
+      if (header.reserve(sizeof(T_BASIC_REALM) - 1 + strlen(realm) + 1)) {
         header.concat(T_BASIC_REALM);
         header.concat(realm);
         header.concat('"');
         r->addHeader(T_WWW_AUTH, header.c_str());
       } else {
-#ifdef ESP32
-        log_e("Failed to allocate");
-#endif
+        async_ws_log_e("Failed to allocate");
         abort();
       }
 
@@ -1011,7 +1015,7 @@ void AsyncWebServerRequest::requestAuthentication(AsyncAuthType method, const ch
     }
     case AsyncAuthType::AUTH_DIGEST:
     {
-      size_t len = strlen(T_DIGEST_) + strlen(T_realm__) + strlen(T_auth_nonce) + 32 + strlen(T__opaque) + 32 + 1;
+      size_t len = sizeof(T_DIGEST_) - 1 + sizeof(T_realm__) - 1 + sizeof(T_auth_nonce) - 1 + 32 + sizeof(T__opaque) - 1 + 32 + 1;
       String header;
       if (header.reserve(len + strlen(realm))) {
         const String nonce = genRandomMD5();
@@ -1027,9 +1031,7 @@ void AsyncWebServerRequest::requestAuthentication(AsyncAuthType method, const ch
           header.concat((char)0x22);  // '"'
           r->addHeader(T_WWW_AUTH, header.c_str());
         } else {
-#ifdef ESP32
-          log_e("Failed to allocate");
-#endif
+          async_ws_log_e("Failed to allocate");
           abort();
         }
       }
@@ -1079,15 +1081,6 @@ const String &AsyncWebServerRequest::argName(size_t i) const {
   return getParam(i)->name();
 }
 
-const String &AsyncWebServerRequest::pathArg(size_t i) const {
-  if (i >= _pathParams.size()) {
-    return emptyString;
-  }
-  auto it = _pathParams.begin();
-  std::advance(it, i);
-  return *it;
-}
-
 const String &AsyncWebServerRequest::header(const char *name) const {
   const AsyncWebHeader *h = getHeader(name);
   return h ? h->value() : emptyString;
@@ -1116,9 +1109,7 @@ String AsyncWebServerRequest::urlDecode(const String &text) const {
   String decoded;
   // Allocate the string internal buffer - never longer from source text
   if (!decoded.reserve(len)) {
-#ifdef ESP32
-    log_e("Failed to allocate");
-#endif
+    async_ws_log_e("Failed to allocate");
     return emptyString;
   }
   while (i < len) {
@@ -1180,4 +1171,10 @@ const char *AsyncWebServerRequest::requestedConnTypeToString() const {
 bool AsyncWebServerRequest::isExpectedRequestedConnType(RequestedConnectionType erct1, RequestedConnectionType erct2, RequestedConnectionType erct3) const {
   return ((erct1 != RCT_NOT_USED) && (erct1 == _reqconntype)) || ((erct2 != RCT_NOT_USED) && (erct2 == _reqconntype))
          || ((erct3 != RCT_NOT_USED) && (erct3 == _reqconntype));
+}
+
+AsyncClient *AsyncWebServerRequest::clientRelease() {
+  AsyncClient *c = _client;
+  _client = nullptr;
+  return c;
 }

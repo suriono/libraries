@@ -397,6 +397,16 @@ void SFE_UBLOX_GNSS::end(void)
     packetUBXTIMTM2 = NULL; // Redundant?
   }
 
+  if (packetUBXTIMSMEAS != NULL)
+  {
+    if (packetUBXTIMSMEAS->callbackData != NULL)
+    {
+      delete packetUBXTIMSMEAS->callbackData;
+    }
+    delete packetUBXTIMSMEAS;
+    packetUBXTIMSMEAS = NULL; // Redundant
+  }
+
   if (packetUBXESFALG != NULL)
   {
     if (packetUBXESFALG->callbackData != NULL)
@@ -1448,6 +1458,10 @@ bool SFE_UBLOX_GNSS::checkAutomatic(uint8_t Class, uint8_t ID)
       if (packetUBXTIMTM2 != NULL)
         result = true;
       break;
+    case UBX_TIM_SMEAS:
+      if (packetUBXTIMSMEAS != NULL)
+        result = true;
+      break;
     }
   }
   break;
@@ -1627,6 +1641,9 @@ uint16_t SFE_UBLOX_GNSS::getMaxPayloadSize(uint8_t Class, uint8_t ID)
     {
     case UBX_TIM_TM2:
       maxSize = UBX_TIM_TM2_LEN;
+      break;
+    case UBX_TIM_SMEAS:
+      maxSize = UBX_TIM_SMEAS_MAX_LEN;
       break;
     }
   }
@@ -2288,11 +2305,16 @@ bool SFE_UBLOX_GNSS::processThisNMEA()
 // This is the default or generic NMEA processor. We're only going to pipe the data to serial port so we can see it.
 // User could overwrite this function to pipe characters to nmea.process(c) of tinyGPS or MicroNMEA
 // Or user could pipe each character to a buffer, radio, etc.
-void SFE_UBLOX_GNSS::processNMEA(char incoming)
+void SFE_UBLOX_GNSS::processNMEA_v(char incoming)
 {
   // If user has assigned an output port then pipe the characters there
   if (_nmeaOutputPort != NULL)
     _nmeaOutputPort->write(incoming); // Echo this byte to the serial port
+}
+
+void SFE_UBLOX_GNSS::processNMEA(char incoming)
+{
+  processNMEA_v(incoming);
 }
 
 #ifndef SFE_UBLOX_DISABLE_AUTO_NMEA
@@ -2882,7 +2904,7 @@ nmeaAutomaticFlags *SFE_UBLOX_GNSS::getNMEAFlagsPtr()
 // Byte 2: 10-bits of length of this packet including the first two-ish header bytes, + 6.
 // byte 3 + 4 bits: Msg type 12 bits
 // Example: D3 00 7C 43 F0 ... / 0x7C = 124+6 = 130 bytes in this packet, 0x43F = Msg type 1087
-SFE_UBLOX_GNSS::sfe_ublox_sentence_types_e SFE_UBLOX_GNSS::processRTCMframe(uint8_t incoming, uint16_t *rtcmFrameCounter)
+SFE_UBLOX_GNSS::sfe_ublox_sentence_types_e SFE_UBLOX_GNSS::processRTCMframe_v(uint8_t incoming, uint16_t *rtcmFrameCounter)
 {
   static uint16_t rtcmLen = 0;
 
@@ -2912,10 +2934,15 @@ SFE_UBLOX_GNSS::sfe_ublox_sentence_types_e SFE_UBLOX_GNSS::processRTCMframe(uint
   return (*rtcmFrameCounter == rtcmLen) ? SFE_UBLOX_SENTENCE_TYPE_NONE : SFE_UBLOX_SENTENCE_TYPE_RTCM;
 }
 
+SFE_UBLOX_GNSS::sfe_ublox_sentence_types_e SFE_UBLOX_GNSS::processRTCMframe(uint8_t incoming, uint16_t *rtcmFrameCounter)
+{
+  return processRTCMframe_v(incoming, rtcmFrameCounter);
+}
+
 // This function is called for each byte of an RTCM frame
 // Ths user can overwrite this function and process the RTCM frame as they please
 // Bytes can be piped to Serial or other interface. The consumer could be a radio or the internet (Ntrip broadcaster)
-void SFE_UBLOX_GNSS::processRTCM(uint8_t incoming)
+void SFE_UBLOX_GNSS::processRTCM_v(uint8_t incoming)
 {
   // Radio.sendReliable((String)incoming); //An example of passing this byte to a radio
 
@@ -2928,6 +2955,11 @@ void SFE_UBLOX_GNSS::processRTCM(uint8_t incoming)
   //   if(rtcmFrameCounter % 16 == 0) _debugSerial->println();
 
   (void)incoming; // Do something with incoming just to get rid of the pesky compiler warning!
+}
+
+void SFE_UBLOX_GNSS::processRTCM(uint8_t incoming)
+{
+  processRTCM_v(incoming);
 }
 
 // Given a character, file it away into the uxb packet structure
@@ -4138,12 +4170,51 @@ void SFE_UBLOX_GNSS::processUBXpacket(ubxPacket *msg)
         if ((packetUBXTIMTM2->callbackData != NULL)                                     // If RAM has been allocated for the copy of the data
             && (packetUBXTIMTM2->automaticFlags.flags.bits.callbackCopyValid == false)) // AND the data is stale
         {
-          memcpy(&packetUBXTIMTM2->callbackData->ch, &packetUBXTIMTM2->data.ch, sizeof(UBX_TIM_TM2_data_t));
+          memcpy(packetUBXTIMTM2->callbackData, &packetUBXTIMTM2->data, sizeof(UBX_TIM_TM2_data_t));
           packetUBXTIMTM2->automaticFlags.flags.bits.callbackCopyValid = true;
         }
 
         // Check if we need to copy the data into the file buffer
         if (packetUBXTIMTM2->automaticFlags.flags.bits.addToFileBuffer)
+        {
+          storePacket(msg);
+        }
+      }
+    }
+    else if (msg->id == UBX_TIM_SMEAS && msg->len <= UBX_TIM_SMEAS_MAX_LEN)
+    {
+      // Parse various byte fields into storage - but only if we have memory allocated for it
+      if (packetUBXTIMSMEAS != NULL)
+      {
+
+        packetUBXTIMSMEAS->data.version = extractByte(msg, 0);
+        packetUBXTIMSMEAS->data.numMeas = extractByte(msg, 1);
+        packetUBXTIMSMEAS->data.iTOW = extractLong(msg, 4);
+
+        for (int i = 0; i < packetUBXTIMSMEAS->data.numMeas; i++) {
+          packetUBXTIMSMEAS->data.data[i].sourceId = extractByte(msg, 12 + 24 * i);
+          packetUBXTIMSMEAS->data.data[i].flags.all = extractByte(msg, 13 + 24 * i);
+          packetUBXTIMSMEAS->data.data[i].phaseOffsetFrac = extractSignedChar(msg, 14 + 24 * i);
+          packetUBXTIMSMEAS->data.data[i].phaseUncFrac = extractByte(msg, 15 + 24 * i);
+          packetUBXTIMSMEAS->data.data[i].phaseOffset = extractSignedLong(msg, 16 + 24 * i);
+          packetUBXTIMSMEAS->data.data[i].phaseUnc = extractLong(msg, 20 + 24 * i);
+          packetUBXTIMSMEAS->data.data[i].freqOffset = extractSignedLong(msg, 28 + 24 * i);
+          packetUBXTIMSMEAS->data.data[i].freqUnc = extractLong(msg, 32 + 24 * i);
+        }
+
+        // Mark all datums as fresh (not read before)
+        packetUBXTIMSMEAS->moduleQueried.moduleQueried.all = 0xFFFFFFFF;
+
+        // Check if we need to copy the data for the callback
+        if ((packetUBXTIMSMEAS->callbackData != NULL)                                     // If RAM has been allocated for the copy of the data
+            && (packetUBXTIMSMEAS->automaticFlags.flags.bits.callbackCopyValid == false)) // AND the data is stale
+        {
+          memcpy(packetUBXTIMSMEAS->callbackData, &packetUBXTIMSMEAS->data, sizeof(UBX_TIM_SMEAS_data_t));
+          packetUBXTIMSMEAS->automaticFlags.flags.bits.callbackCopyValid = true;
+        }
+
+        // Check if we need to copy the data into the file buffer
+        if (packetUBXTIMSMEAS->automaticFlags.flags.bits.addToFileBuffer)
         {
           storePacket(msg);
         }
@@ -5686,6 +5757,19 @@ void SFE_UBLOX_GNSS::checkCallbacks(void)
       packetUBXTIMTM2->callbackPointerPtr(packetUBXTIMTM2->callbackData); // Call the callback
     }
     packetUBXTIMTM2->automaticFlags.flags.bits.callbackCopyValid = false; // Mark the data as stale
+  }
+
+  if ((packetUBXTIMSMEAS != NULL)                                                  // If RAM has been allocated for message storage
+      && (packetUBXTIMSMEAS->callbackData != NULL)                                 // If RAM has been allocated for the copy of the data
+      && (packetUBXTIMSMEAS->automaticFlags.flags.bits.callbackCopyValid == true)) // If the copy of the data is valid
+  {
+    if (packetUBXTIMSMEAS->callbackPointer != NULL) // If the pointer to the callback has been defined
+    {
+      // if (_printDebug == true)
+      //   _debugSerial->println(F("checkCallbacks: calling callback for TIM SMEA"));
+      packetUBXTIMSMEAS->callbackPointer(*packetUBXTIMSMEAS->callbackData); // Call the callback
+    }
+    packetUBXTIMSMEAS->automaticFlags.flags.bits.callbackCopyValid = false; // Mark the data as stale
   }
 
   if ((packetUBXESFALG != NULL)                                                  // If RAM has been allocated for message storage
@@ -7710,25 +7794,33 @@ bool SFE_UBLOX_GNSS::getProtocolVersion(uint16_t maxWait)
   // }
 
   // We will step through the payload looking at each extension field of 30 bytes
-  for (uint8_t extensionNumber = 0; extensionNumber < 10; extensionNumber++)
+  char *ptr;
+  for (uint8_t extensionNumber = 0; extensionNumber < ((packetCfg.len - 40) / 30); extensionNumber++)
   {
-    // Now we need to find "PROTVER=18.00" in the incoming byte stream
-    if ((payloadCfg[(30 * extensionNumber) + 0] == 'P') && (payloadCfg[(30 * extensionNumber) + 6] == 'R'))
+    ptr = strstr((const char *)&payloadCfg[(30 * extensionNumber)], "PROTVER="); // Check for PROTVER (should be in extension 2)
+    if (ptr != nullptr)
     {
-      moduleSWVersion->versionHigh = (payloadCfg[(30 * extensionNumber) + 8] - '0') * 10 + (payloadCfg[(30 * extensionNumber) + 9] - '0');  // Convert '18' to 18
-      moduleSWVersion->versionLow = (payloadCfg[(30 * extensionNumber) + 11] - '0') * 10 + (payloadCfg[(30 * extensionNumber) + 12] - '0'); // Convert '00' to 00
-      moduleSWVersion->moduleQueried = true;                                                                                                // Mark this data as new
+      ptr += strlen("PROTVER="); // Point to the protocol version
+      int protHi = 0;
+      int protLo = 0;
+      int scanned = sscanf(ptr, "%d.%d", &protHi, &protLo);
+      if (scanned == 2) // Check we extracted the firmware version successfully
+      {
+        moduleSWVersion->versionHigh = protHi;
+        moduleSWVersion->versionLow = protLo;
+        moduleSWVersion->moduleQueried = true; // Mark this data as new
 
 #ifndef SFE_UBLOX_REDUCED_PROG_MEM
-      if (_printDebug == true)
-      {
-        _debugSerial->print(F("Protocol version: "));
-        _debugSerial->print(moduleSWVersion->versionHigh);
-        _debugSerial->print(F("."));
-        _debugSerial->println(moduleSWVersion->versionLow);
-      }
+        if (_printDebug == true)
+        {
+          _debugSerial->print(F("Protocol version: "));
+          _debugSerial->print(moduleSWVersion->versionHigh);
+          _debugSerial->print(F("."));
+          _debugSerial->println(moduleSWVersion->versionLow);
+        }
 #endif
-      return (true); // Success!
+        return (true); // Success!
+      }
     }
   }
 
@@ -7963,28 +8055,7 @@ bool SFE_UBLOX_GNSS::powerSaveMode(bool power_save, uint16_t maxWait)
   }
 
   // Now let's change the power setting using UBX-CFG-RXM
-  packetCfg.cls = UBX_CLASS_CFG;
-  packetCfg.id = UBX_CFG_RXM;
-  packetCfg.len = 0;
-  packetCfg.startingSpot = 0;
-
-  // Ask module for the current power management settings. Loads into payloadCfg.
-  if (sendCommand(&packetCfg, maxWait) != SFE_UBLOX_STATUS_DATA_RECEIVED) // We are expecting data and an ACK
-    return (false);
-
-  if (power_save)
-  {
-    payloadCfg[1] = 1; // Power Save Mode
-  }
-  else
-  {
-    payloadCfg[1] = 0; // Continuous Mode
-  }
-
-  packetCfg.len = 2;
-  packetCfg.startingSpot = 0;
-
-  return (sendCommand(&packetCfg, maxWait) == SFE_UBLOX_STATUS_DATA_SENT); // We are only expecting an ACK
+  return setupPowerMode(power_save ? SFE_UBLOX_CFG_RXM_POWERSAVE : SFE_UBLOX_CFG_RXM_CONTINUOUS, maxWait);
 }
 
 // Get Power Save Mode
@@ -8150,6 +8221,98 @@ bool SFE_UBLOX_GNSS::powerOffWithInterrupt(uint32_t durationInMs, uint32_t wakeu
   }
 }
 
+bool SFE_UBLOX_GNSS::setPowerManagement(sfe_ublox_pms_mode_e mode, uint16_t period, uint16_t onTime, uint16_t maxWait)
+{
+  // INVALID only valid in response
+  if (mode == SFE_UBLOX_PMS_MODE_INVALID)
+    return false;
+  packetCfg.cls = UBX_CLASS_CFG;
+  packetCfg.id = UBX_CFG_PMS;
+  packetCfg.len = 8;
+  packetCfg.startingSpot = 0;
+
+  packetCfg.payload[0] = 0x0; //message version
+  packetCfg.payload[1] = mode;
+  // only valid if mode==SFE_UBLOX_PMS_MODE_INTERVAL
+  if (mode == SFE_UBLOX_PMS_MODE_INTERVAL)
+  {
+    packetCfg.payload[2] = period >> 8;
+    packetCfg.payload[3] = period & 0xff;
+    packetCfg.payload[4] = onTime >> 8;
+    packetCfg.payload[5] = onTime & 0xff;
+  }
+  else
+  {
+    packetCfg.payload[2] = 0;
+    packetCfg.payload[3] = 0;
+    packetCfg.payload[4] = 0;
+    packetCfg.payload[5] = 0;
+  }
+  packetCfg.payload[6] = 0x0; //reserved
+  packetCfg.payload[7] = 0x0; //reserved
+  return sendCommand(&packetCfg, maxWait);
+}
+
+bool SFE_UBLOX_GNSS::setupPowerMode(sfe_ublox_rxm_mode_e mode, uint16_t maxWait)
+{
+  packetCfg.cls = UBX_CLASS_CFG;
+  packetCfg.id = UBX_CFG_RXM;
+  packetCfg.len = 2;
+  packetCfg.startingSpot = 0;
+
+  packetCfg.payload[0] = 0x0; //reserved
+  packetCfg.payload[1] = mode; //low power mode
+
+  return sendCommand(&packetCfg, maxWait);
+}
+
+
+// Position Accuracy
+
+// Change the Position Accuracy using UBX-CFG-NAV5
+// Value provided in meters
+bool SFE_UBLOX_GNSS::setNAV5PositionAccuracy(uint16_t metres, uint16_t maxWait)
+{
+  packetCfg.cls = UBX_CLASS_CFG;
+  packetCfg.id = UBX_CFG_NAV5;
+  packetCfg.len = 0;
+  packetCfg.startingSpot = 0;
+
+  // Ask module for the current navigation model settings. Loads into payloadCfg.
+  if (sendCommand(&packetCfg, maxWait) != SFE_UBLOX_STATUS_DATA_RECEIVED) // We are expecting data and an ACK
+    return (false);
+
+  payloadCfg[0] |= 0x10; // mask: set the posMask, leave other bits unchanged
+  payloadCfg[18] = metres & 0xFF;
+  payloadCfg[19] = metres >> 8;
+
+  packetCfg.len = 36;
+  packetCfg.startingSpot = 0;
+
+  return (sendCommand(&packetCfg, maxWait) == SFE_UBLOX_STATUS_DATA_SENT); // We are only expecting an ACK
+}
+
+// Get the position accuracy using UBX-CFG-NAV5
+// Returns meters. 0 if the sendCommand fails
+uint16_t SFE_UBLOX_GNSS::getNAV5PositionAccuracy(uint16_t maxWait)
+{
+  packetCfg.cls = UBX_CLASS_CFG;
+  packetCfg.id = UBX_CFG_NAV5;
+  packetCfg.len = 0;
+  packetCfg.startingSpot = 0;
+
+  // Ask module for the current navigation model settings. Loads into payloadCfg.
+  if (sendCommand(&packetCfg, maxWait) != SFE_UBLOX_STATUS_DATA_RECEIVED) // We are expecting data and an ACK
+    return 0;
+
+
+  uint16_t pAcc = ((uint16_t)payloadCfg[19]) << 8;
+  pAcc |= payloadCfg[18];
+  return (pAcc);
+}
+
+
+
 // Dynamic Platform Model
 
 // Change the dynamic platform model using UBX-CFG-NAV5
@@ -8169,8 +8332,7 @@ bool SFE_UBLOX_GNSS::setDynamicModel(dynModel newDynamicModel, uint16_t maxWait)
   if (sendCommand(&packetCfg, maxWait) != SFE_UBLOX_STATUS_DATA_RECEIVED) // We are expecting data and an ACK
     return (false);
 
-  payloadCfg[0] = 0x01;            // mask: set only the dyn bit (0)
-  payloadCfg[1] = 0x00;            // mask
+  payloadCfg[0] |= 0x01;            // mask: set only the dyn bit (0)
   payloadCfg[2] = newDynamicModel; // dynModel
 
   packetCfg.len = 36;
@@ -8293,6 +8455,7 @@ bool SFE_UBLOX_GNSS::enableGNSS(bool enable, sfe_ublox_gnss_ids_e id, uint16_t m
         payloadCfg[(block * 8) + 4 + 4] |= 0x01; // Set the enable bit in flags (Little Endian)
       else
         payloadCfg[(block * 8) + 4 + 4] &= 0xFE; // Clear the enable bit in flags (Little Endian)
+      break;
     }
   }
 
@@ -8310,8 +8473,6 @@ bool SFE_UBLOX_GNSS::isGNSSenabled(sfe_ublox_gnss_ids_e id, uint16_t maxWait)
   if (sendCommand(&packetCfg, maxWait) != SFE_UBLOX_STATUS_DATA_RECEIVED) // We are expecting data and an ACK
     return (false);
 
-  bool retVal = false;
-
   uint8_t numConfigBlocks = payloadCfg[3]; // Extract the numConfigBlocks
 
   for (uint8_t block = 0; block < numConfigBlocks; block++) // Check each configuration block
@@ -8320,11 +8481,11 @@ bool SFE_UBLOX_GNSS::isGNSSenabled(sfe_ublox_gnss_ids_e id, uint16_t maxWait)
     {
       // We have a match so check the enable bit in flags
       if ((payloadCfg[(block * 8) + 4 + 4] & 0x01) > 0) // Check the enable bit in flags (Little Endian)
-        retVal = true;
+        return true;
     }
   }
 
-  return (retVal);
+  return false;
 }
 
 // Reset ESF automatic IMU-mount alignment
@@ -14093,6 +14254,60 @@ bool SFE_UBLOX_GNSS::setAutoTIMTM2rate(uint8_t rate, bool implicitUpdate, uint16
   return ok;
 }
 
+
+bool SFE_UBLOX_GNSS::setAutoTIMSMEA(bool enabled, bool implicitUpdate, uint16_t maxWait)
+{
+  if (packetUBXTIMSMEAS == NULL)
+    initPacketUBXTIMSMEA();     // Check that RAM has been allocated for the data
+  if (packetUBXTIMSMEAS == NULL) // Only attempt this if RAM allocation was successful
+    return false;
+
+  uint8_t rate = enabled ? 1 : 0;
+
+  packetCfg.cls = UBX_CLASS_CFG;
+  packetCfg.id = UBX_CFG_MSG;
+  packetCfg.len = 3;
+  packetCfg.startingSpot = 0;
+  payloadCfg[0] = UBX_CLASS_TIM;
+  payloadCfg[1] = UBX_TIM_SMEAS;
+  payloadCfg[2] = rate; // rate relative to navigation freq.
+
+  bool ok = ((sendCommand(&packetCfg, maxWait)) == SFE_UBLOX_STATUS_DATA_SENT); // We are only expecting an ACK
+  if (ok)
+  {
+    packetUBXTIMSMEAS->automaticFlags.flags.bits.automatic = (rate > 0);
+    packetUBXTIMSMEAS->automaticFlags.flags.bits.implicitUpdate = implicitUpdate;
+  }
+  packetUBXTIMSMEAS->moduleQueried.moduleQueried.bits.all = false;
+  return ok;
+}
+
+
+bool SFE_UBLOX_GNSS::setAutoTIMSMEAcallback(void (*callbackPointer)(UBX_TIM_SMEAS_data_t), uint16_t maxWait) {
+  // Enable auto messages. Set implicitUpdate to false as we expect the user to call checkUblox manually.
+  bool result = setAutoTIMSMEA(true, false, maxWait);
+  if (!result)
+    return (result); // Bail if setAuto failed
+
+  if (packetUBXTIMSMEAS->callbackData == NULL) // Check if RAM has been allocated for the callback copy
+  {
+    packetUBXTIMSMEAS->callbackData = new UBX_TIM_SMEAS_data_t; // Allocate RAM for the main struct
+  }
+
+  if (packetUBXTIMSMEAS->callbackData == NULL)
+  {
+#ifndef SFE_UBLOX_REDUCED_PROG_MEM
+    if ((_printDebug == true) || (_printLimitedDebug == true)) // This is important. Print this if doing limited debugging
+      _debugSerial->println(F("setAutoTIMSMEAcallback: RAM alloc failed!"));
+#endif
+    return (false);
+  }
+
+  packetUBXTIMSMEAS->callbackPointer = callbackPointer;
+  return (true);
+}
+
+
 // Enable automatic navigation message generation by the GNSS.
 bool SFE_UBLOX_GNSS::setAutoTIMTM2callback(void (*callbackPointer)(UBX_TIM_TM2_data_t), uint16_t maxWait)
 {
@@ -14162,6 +14377,25 @@ bool SFE_UBLOX_GNSS::assumeAutoTIMTM2(bool enabled, bool implicitUpdate)
   return changes;
 }
 
+// PRIVATE: Allocate RAM for packetUBXTIMSMEA and initialize it
+bool SFE_UBLOX_GNSS::initPacketUBXTIMSMEA()
+{
+  packetUBXTIMSMEAS = new UBX_TIM_SMEAS_t; // Allocate RAM for the main struct
+  if (packetUBXTIMSMEAS == NULL)
+  {
+#ifndef SFE_UBLOX_REDUCED_PROG_MEM
+    if ((_printDebug == true) || (_printLimitedDebug == true)) // This is important. Print this if doing limited debugging
+      _debugSerial->println(F("initPacketUBXTIMSMEA: RAM alloc failed!"));
+#endif
+    return (false);
+  }
+  packetUBXTIMSMEAS->automaticFlags.flags.all = 0;
+  packetUBXTIMSMEAS->callbackPointer = NULL;
+  packetUBXTIMSMEAS->callbackData = NULL;
+  packetUBXTIMSMEAS->moduleQueried.moduleQueried.all = 0;
+  return (true);
+}
+
 // PRIVATE: Allocate RAM for packetUBXTIMTM2 and initialize it
 bool SFE_UBLOX_GNSS::initPacketUBXTIMTM2()
 {
@@ -14190,12 +14424,28 @@ void SFE_UBLOX_GNSS::flushTIMTM2()
   packetUBXTIMTM2->moduleQueried.moduleQueried.all = 0; // Mark all datums as stale (read before)
 }
 
+// Mark all the data as read/stale
+void SFE_UBLOX_GNSS::flushTIMSMEA()
+{
+  if (packetUBXTIMSMEAS == NULL)
+    return;                                             // Bail if RAM has not been allocated (otherwise we could be writing anywhere!)
+  packetUBXTIMSMEAS->moduleQueried.moduleQueried.all = 0; // Mark all datums as stale (read before)
+}
+
 // Log this data in file buffer
 void SFE_UBLOX_GNSS::logTIMTM2(bool enabled)
 {
   if (packetUBXTIMTM2 == NULL)
     return; // Bail if RAM has not been allocated (otherwise we could be writing anywhere!)
   packetUBXTIMTM2->automaticFlags.flags.bits.addToFileBuffer = (uint8_t)enabled;
+}
+
+// Log this data in file buffer
+void SFE_UBLOX_GNSS::logTIMSMEA(bool enabled)
+{
+  if (packetUBXTIMSMEAS == NULL)
+    return; // Bail if RAM has not been allocated (otherwise we could be writing anywhere!)
+  packetUBXTIMSMEAS->automaticFlags.flags.bits.addToFileBuffer = (uint8_t)enabled;
 }
 
 // ***** ESF ALG automatic support
@@ -17369,6 +17619,21 @@ bool SFE_UBLOX_GNSS::getDiffSoln(uint16_t maxWait)
   return (packetUBXNAVPVT->data.flags.bits.diffSoln);
 }
 
+// Get power save mode from NAV-PVT
+bool SFE_UBLOX_GNSS::getNAVPVTPSMMode(uint16_t maxWait)
+{
+  if (packetUBXNAVPVT == NULL)
+    initPacketUBXNAVPVT();     // Check that RAM has been allocated for the PVT data
+  if (packetUBXNAVPVT == NULL) // Bail if the RAM allocation failed
+    return 0;
+
+  if (packetUBXNAVPVT->moduleQueried.moduleQueried1.bits.psmState== false)
+    getPVT(maxWait);
+  packetUBXNAVPVT->moduleQueried.moduleQueried1.bits.psmState= false; // Since we are about to give this to user, mark this data as stale
+  packetUBXNAVPVT->moduleQueried.moduleQueried1.bits.all = false;
+  return (packetUBXNAVPVT->data.flags.bits.psmState);
+}
+
 // Get whether head vehicle valid or not
 bool SFE_UBLOX_GNSS::getHeadVehValid(uint16_t maxWait)
 {
@@ -18445,7 +18710,7 @@ float SFE_UBLOX_GNSS::getHNRheading(uint16_t maxWait) // Returned as degrees
 // From v2.0: These are public. The user can call these to extract data from custom packets
 
 // Given a spot in the payload array, extract eight bytes and build a uint64_t
-uint64_t SFE_UBLOX_GNSS::extractLongLong(ubxPacket *msg, uint16_t spotToStart)
+uint64_t SFE_UBLOX_GNSS::extractLongLong(const ubxPacket *msg, uint16_t spotToStart)
 {
   uint64_t val = 0;
   val |= (uint64_t)msg->payload[spotToStart + 0] << 8 * 0;
@@ -18460,7 +18725,7 @@ uint64_t SFE_UBLOX_GNSS::extractLongLong(ubxPacket *msg, uint16_t spotToStart)
 }
 
 // Given a spot in the payload array, extract four bytes and build a long
-uint32_t SFE_UBLOX_GNSS::extractLong(ubxPacket *msg, uint16_t spotToStart)
+uint32_t SFE_UBLOX_GNSS::extractLong(const ubxPacket *msg, uint16_t spotToStart)
 {
   uint32_t val = 0;
   val |= (uint32_t)msg->payload[spotToStart + 0] << 8 * 0;
@@ -18471,7 +18736,7 @@ uint32_t SFE_UBLOX_GNSS::extractLong(ubxPacket *msg, uint16_t spotToStart)
 }
 
 // Just so there is no ambiguity about whether a uint32_t will cast to a int32_t correctly...
-int32_t SFE_UBLOX_GNSS::extractSignedLong(ubxPacket *msg, uint16_t spotToStart)
+int32_t SFE_UBLOX_GNSS::extractSignedLong(const ubxPacket *msg, uint16_t spotToStart)
 {
   union // Use a union to convert from uint32_t to int32_t
   {
@@ -18484,7 +18749,7 @@ int32_t SFE_UBLOX_GNSS::extractSignedLong(ubxPacket *msg, uint16_t spotToStart)
 }
 
 // Given a spot in the payload array, extract two bytes and build an int
-uint16_t SFE_UBLOX_GNSS::extractInt(ubxPacket *msg, uint16_t spotToStart)
+uint16_t SFE_UBLOX_GNSS::extractInt(const ubxPacket *msg, uint16_t spotToStart)
 {
   uint16_t val = 0;
   val |= (uint16_t)msg->payload[spotToStart + 0] << 8 * 0;
@@ -18493,7 +18758,7 @@ uint16_t SFE_UBLOX_GNSS::extractInt(ubxPacket *msg, uint16_t spotToStart)
 }
 
 // Just so there is no ambiguity about whether a uint16_t will cast to a int16_t correctly...
-int16_t SFE_UBLOX_GNSS::extractSignedInt(ubxPacket *msg, uint16_t spotToStart)
+int16_t SFE_UBLOX_GNSS::extractSignedInt(const ubxPacket *msg, uint16_t spotToStart)
 {
   union // Use a union to convert from uint16_t to int16_t
   {
@@ -18506,13 +18771,13 @@ int16_t SFE_UBLOX_GNSS::extractSignedInt(ubxPacket *msg, uint16_t spotToStart)
 }
 
 // Given a spot, extract a byte from the payload
-uint8_t SFE_UBLOX_GNSS::extractByte(ubxPacket *msg, uint16_t spotToStart)
+uint8_t SFE_UBLOX_GNSS::extractByte(const ubxPacket *msg, uint16_t spotToStart)
 {
   return (msg->payload[spotToStart]);
 }
 
 // Given a spot, extract a signed 8-bit value from the payload
-int8_t SFE_UBLOX_GNSS::extractSignedChar(ubxPacket *msg, uint16_t spotToStart)
+int8_t SFE_UBLOX_GNSS::extractSignedChar(const ubxPacket *msg, uint16_t spotToStart)
 {
   union // Use a union to convert from uint8_t to int8_t
   {

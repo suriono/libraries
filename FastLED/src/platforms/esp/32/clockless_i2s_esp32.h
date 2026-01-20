@@ -106,7 +106,7 @@
     "NOTE: ESP32 support using I2S parallel driver. All strips must use the same chipset"
 
 #include "eorder.h"
-#include "platforms/esp/32/i2s/i2s.h"
+#include "platforms/esp/32/i2s/i2s_esp32dev.h"
 #include "fl/namespace.h"
 
 FASTLED_NAMESPACE_BEGIN
@@ -156,7 +156,7 @@ class ClocklessController : public CPixelLEDController<RGB_ORDER> {
     gpio_num_t mPin;
 
     // -- Verify that the pin is valid
-    static_assert(FastPin<DATA_PIN>::validpin(), "Invalid pin specified");
+    static_assert(FastPin<DATA_PIN>::validpin(), "This pin has been marked as an invalid pin, common reasons includes it being a ground pin, read only, or too noisy (e.g. hooked up to the uart).");
 
     // -- Save the pixel controller
     PixelController<RGB_ORDER> *mPixels;

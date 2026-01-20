@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright 2016-2025 Hristo Gochkov, Mathieu Carbou, Emil Muratov
+// Copyright 2016-2026 Hristo Gochkov, Mathieu Carbou, Emil Muratov, Will Miles
 
 //
 // Perf tests
 //
 
 #include <Arduino.h>
-#ifdef ESP32
+#if defined(ESP32) || defined(LIBRETINY)
 #include <AsyncTCP.h>
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
-#elif defined(TARGET_RP2040)
-#include <WebServer.h>
+#elif defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
+#include <RPAsyncTCP.h>
 #include <WiFi.h>
 #endif
 
@@ -86,23 +86,45 @@ static size_t charactersIndex = 0;
 static AsyncWebServer server(80);
 static AsyncEventSource events("/events");
 
+static volatile size_t requests = 0;
+
 void setup() {
   Serial.begin(115200);
 
-#ifndef CONFIG_IDF_TARGET_ESP32H2
+#if ASYNCWEBSERVER_WIFI_SUPPORTED
   WiFi.mode(WIFI_AP);
   WiFi.softAP("esp-captive");
 #endif
 
+  // Pauses in the request parsing phase
+  //
+  // autocannon -c 32 -w 32 -a 96 -t 30 --renderStatusCodes -m POST -H "Content-Type: application/json" -b '{"foo": "bar"}' http://192.168.4.1/delay
+  //
+  // curl -v -X POST -H "Content-Type: application/json" -d '{"game": "test"}' http://192.168.4.1/delay
+  //
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    requests = requests + 1;
+    if (request->url() == "/delay") {
+      request->send(200, "application/json", "{\"status\":\"OK\"}");
+    } else {
+      request->send(404, "text/plain", "Not found");
+    }
+  });
+  server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    if (request->url() == "/delay") {
+      delay(3000);
+    }
+  });
+
   // HTTP endpoint
   //
-  // > brew install autocannon
-  // > autocannon -c 10 -w 10 -d 20 http://192.168.4.1
-  // > autocannon -c 16 -w 16 -d 20 http://192.168.4.1
+  // > autocannon -c 16 -w 16 -d 20 --renderStatusCodes  http://192.168.4.1/
+  // > ab -c 16 -t 20 http://192.168.4.1/
   //
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     // need to cast to uint8_t*
     // if you do not, the const char* will be copied in a temporary String buffer
+    requests = requests + 1;
     request->send(200, "text/html", (uint8_t *)htmlContent, htmlContentLength);
   });
 
@@ -119,7 +141,13 @@ void setup() {
   //
   // time curl -N -v -G -d 'd=2000' -d 'l=10000'  http://192.168.4.1/slow.html --output -
   //
+  // THIS CODE WILL CRASH BECAUSE OF THE WATCHDOG.
+  // IF YOU REALLY NEED TO DO THIS, YOU MUST DISABLE THE TWDT
+  //
+  // CORRECT WAY IS TO USE SSE OR WEBSOCKETS TO DO THE COSTLY PROCESSING ASYNC.
+  //
   server.on("/slow.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    requests = requests + 1;
     uint32_t d = request->getParam("d")->value().toInt();
     uint32_t l = request->getParam("l")->value().toInt();
     Serial.printf("d = %" PRIu32 ", l = %" PRIu32 "\n", d, l);
@@ -144,7 +172,6 @@ void setup() {
   // SSS endpoint
   //
   // launch 16 concurrent workers for 30 seconds
-  // > for i in {1..10}; do ( count=$(gtimeout 30 curl -s -N -H "Accept: text/event-stream" http://192.168.4.1/events 2>&1 | grep -c "^data:"); echo "Total: $count events, $(echo "$count / 4" | bc -l) events / second" ) & done;
   // > for i in {1..16}; do ( count=$(gtimeout 30 curl -s -N -H "Accept: text/event-stream" http://192.168.4.1/events 2>&1 | grep -c "^data:"); echo "Total: $count events, $(echo "$count / 4" | bc -l) events / second" ) & done;
   //
   // With AsyncTCP, with 16 workers: a lot of "Event message queue overflow: discard message", no crash
@@ -212,7 +239,7 @@ void loop() {
 
 #ifdef ESP32
   if (now - lastHeap >= 2000) {
-    Serial.printf("Free heap: %" PRIu32 "\n", ESP.getFreeHeap());
+    Serial.printf("Uptime: %3lu s, requests: %3u, Free heap: %" PRIu32 "\n", millis() / 1000, requests, ESP.getFreeHeap());
     lastHeap = now;
   }
 #endif

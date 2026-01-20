@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright 2016-2025 Hristo Gochkov, Mathieu Carbou, Emil Muratov
+// Copyright 2016-2026 Hristo Gochkov, Mathieu Carbou, Emil Muratov, Will Miles
 
-#ifndef ASYNCEVENTSOURCE_H_
-#define ASYNCEVENTSOURCE_H_
+#pragma once
 
 #include <Arduino.h>
 
-#ifdef ESP32
+#if defined(ESP32) || defined(LIBRETINY)
 #include <AsyncTCP.h>
+#ifdef LIBRETINY
+#ifdef round
+#undef round
+#endif
+#endif
 #include <mutex>
 #ifndef SSE_MAX_QUEUED_MESSAGES
 #define SSE_MAX_QUEUED_MESSAGES 32
@@ -21,8 +25,8 @@
 #endif
 #define SSE_MIN_INFLIGH 2 * 1460  // allow 2 MSS packets
 #define SSE_MAX_INFLIGH 8 * 1024  // but no more than 8k, no need to blow it, since same data is kept in local Q
-#elif defined(TARGET_RP2040)
-#include <AsyncTCP_RP2040W.h>
+#elif defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
+#include <RPAsyncTCP.h>
 #ifndef SSE_MAX_QUEUED_MESSAGES
 #define SSE_MAX_QUEUED_MESSAGES 32
 #endif
@@ -38,6 +42,10 @@
 #include <../src/Hash.h>
 #endif
 #endif
+
+#include <list>
+#include <memory>
+#include <utility>
 
 class AsyncEventSource;
 class AsyncEventSourceResponse;
@@ -60,8 +68,14 @@ private:
 
 public:
   AsyncEventSourceMessage(AsyncEvent_SharedData_t data) : _data(data){};
-#ifdef ESP32
+#if defined(ESP32)
   AsyncEventSourceMessage(const char *data, size_t len) : _data(std::make_shared<String>(data, len)){};
+#elif defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
+  AsyncEventSourceMessage(const char *data, size_t len) : _data(std::make_shared<String>()) {
+    if (data && len > 0) {
+      _data->concat(data, len);
+    }
+  };
 #else
   // esp8266's String does not have constructor with data/length arguments. Use a concat method here
   AsyncEventSourceMessage(const char *data, size_t len) {
@@ -123,13 +137,20 @@ private:
   size_t _max_inflight{SSE_MAX_INFLIGH};  // max num of unacknowledged bytes that could be written to socket buffer
   std::list<AsyncEventSourceMessage> _messageQueue;
 #ifdef ESP32
-  mutable std::mutex _lockmq;
+  mutable std::recursive_mutex _lockmq;
 #endif
   bool _queueMessage(const char *message, size_t len);
   bool _queueMessage(AsyncEvent_SharedData_t &&msg);
   void _runQueue();
 
 public:
+  /**
+   * @brief Construct a new Async Event Source Client object
+   * @note constructor would take the ownership of of AsyncTCP's client pointer from `request` parameter and call delete on it!
+   *
+   * @param request
+   * @param server
+   */
   AsyncEventSourceClient(AsyncWebServerRequest *request, AsyncEventSource *server);
   ~AsyncEventSourceClient();
 
@@ -224,7 +245,7 @@ private:
 #ifdef ESP32
   // Same as for individual messages, protect mutations of _clients list
   // since simultaneous access from different tasks is possible
-  mutable std::mutex _client_queue_lock;
+  mutable std::recursive_mutex _client_queue_lock;
 #endif
   ArEventHandlerFunction _connectcb = nullptr;
   ArEventHandlerFunction _disconnectcb = nullptr;
@@ -294,21 +315,24 @@ public:
   // system callbacks (do not call from user code!)
   void _addClient(AsyncEventSourceClient *client);
   void _handleDisconnect(AsyncEventSourceClient *client);
-  bool canHandle(AsyncWebServerRequest *request) const override final;
-  void handleRequest(AsyncWebServerRequest *request) override final;
+  bool canHandle(AsyncWebServerRequest *request) const final;
+  void handleRequest(AsyncWebServerRequest *request) final;
 };
 
 class AsyncEventSourceResponse : public AsyncWebServerResponse {
 private:
   AsyncEventSource *_server;
+  AsyncWebServerRequest *_request;
+  // this call back will switch AsyncTCP client to SSE
+  void _switchClient();
 
 public:
   AsyncEventSourceResponse(AsyncEventSource *server);
   void _respond(AsyncWebServerRequest *request);
-  size_t _ack(AsyncWebServerRequest *request, size_t len, uint32_t time);
+  size_t _ack(AsyncWebServerRequest *request, size_t len, uint32_t time) override {
+    return 0;
+  };
   bool _sourceValid() const {
     return true;
   }
 };
-
-#endif /* ASYNCEVENTSOURCE_H_ */

@@ -2,6 +2,8 @@
 #include "FastLED.h"
 #include "fl/singleton.h"
 #include "fl/engine_events.h"
+#include "fl/compiler_control.h"
+#include "fl/int.h"
 
 /// @file FastLED.cpp
 /// Central source file for FastLED, implements the CFastLED class/object
@@ -19,32 +21,44 @@
 #endif  // __AVR__
 #endif  // MAX_CLED_CONTROLLERS
 
-#if defined(__SAM3X8E__)
-volatile uint32_t fuckit;
+#ifndef FASTLED_MANUAL_ENGINE_EVENTS
+#define FASTLED_MANUAL_ENGINE_EVENTS 0
 #endif
 
-#ifndef FASTLED_DEFINE_WEAK_YEILD_FUNCTION
-#if defined(__AVR_ATtiny13__)
-// Arduino.h also defines this as a weak function on this platform.
-#define FASTLED_DEFINE_WEAK_YEILD_FUNCTION 0
-#else
-#define FASTLED_DEFINE_WEAK_YEILD_FUNCTION 1
+#if defined(__SAM3X8E__)
+volatile fl::u32 fuckit;
 #endif
-#endif
+
+// Disable to fix build breakage.
+// #ifndef FASTLED_DEFINE_WEAK_YEILD_FUNCTION
+// #if defined(__AVR_ATtiny13__)
+// // Arduino.h also defines this as a weak function on this platform.
+// #define FASTLED_DEFINE_WEAK_YEILD_FUNCTION 0
+// #else
+// #define FASTLED_DEFINE_WEAK_YEILD_FUNCTION 1
+// #endif
+// #endif
 
 /// Has to be declared outside of any namespaces.
 /// Called at program exit when run in a desktop environment. 
 /// Extra C definition that some environments may need. 
 /// @returns 0 to indicate success
-extern "C" __attribute__((weak)) int atexit(void (* /*func*/ )()) { return 0; }
 
-#if FASTLED_DEFINE_WEAK_YEILD_FUNCTION 
-extern "C"  __attribute__((weak)) void yield(void) { }
+#ifndef FASTLED_NO_ATEXIT
+#define FASTLED_NO_ATEXIT 0
+#endif
+
+#if !FASTLED_NO_ATEXIT
+extern "C" FL_LINK_WEAK int atexit(void (* /*func*/ )()) { return 0; }
+#endif
+
+#ifdef FASTLED_NEEDS_YIELD
+extern "C" void yield(void) { }
 #endif
 
 FASTLED_NAMESPACE_BEGIN
 
-uint16_t cled_contoller_size() {
+fl::u16 cled_contoller_size() {
 	return sizeof(CLEDController);
 }
 
@@ -54,19 +68,24 @@ uint8_t get_brightness();
 /// @see https://github.com/pixelmatix/SmartMatrix
 void *pSmartMatrix = NULL;
 
-CFastLED FastLED;
+FL_DISABLE_WARNING_PUSH
+FL_DISABLE_WARNING_GLOBAL_CONSTRUCTORS
+
+CFastLED FastLED;  // global constructor allowed in this case.
+
+FL_DISABLE_WARNING_POP
 
 CLEDController *CLEDController::m_pHead = NULL;
 CLEDController *CLEDController::m_pTail = NULL;
-static uint32_t lastshow = 0;
+static fl::u32 lastshow = 0;
 
 /// Global frame counter, used for debugging ESP implementations
 /// @todo Include in FASTLED_DEBUG_COUNT_FRAME_RETRIES block?
-uint32_t _frame_cnt=0;
+fl::u32 _frame_cnt=0;
 
 /// Global frame retry counter, used for debugging ESP implementations
 /// @todo Include in FASTLED_DEBUG_COUNT_FRAME_RETRIES block?
-uint32_t _retry_cnt=0;
+fl::u32 _retry_cnt=0;
 
 // uint32_t CRGB::Squant = ((uint32_t)((__TIME__[4]-'0') * 28))<<16 | ((__TIME__[6]-'0')*50)<<8 | ((__TIME__[7]-'0')*28);
 
@@ -101,10 +120,18 @@ CLEDController &CFastLED::addLeds(CLEDController *pLed,
 	return *pLed;
 }
 
+// This is bad code. But it produces the smallest binaries for reasons
+// beyond mortal comprehensions.
+// Instead of iterating through the link list for onBeginFrame(), beginShowLeds()
+// and endShowLeds(): store the pointers in an array and iterate through that.
+//
+// static uninitialized gControllersData produces the smallest binary on attiny85.
 static void* gControllersData[MAX_CLED_CONTROLLERS];
 
 void CFastLED::show(uint8_t scale) {
+#if !FASTLED_MANUAL_ENGINE_EVENTS
 	fl::EngineEvents::onBeginFrame();
+#endif
 	while(m_nMinMicros && ((micros()-lastshow) < m_nMinMicros));
 	lastshow = micros();
 
@@ -113,7 +140,7 @@ void CFastLED::show(uint8_t scale) {
 		scale = (*m_pPowerFunc)(scale, m_nPowerData);
 	}
 
-	// static uninitialized gControllersData produces the smallest binary on attiny85.
+
 	int length = 0;
 	CLEDController *pCur = CLEDController::head();
 
@@ -147,7 +174,13 @@ void CFastLED::show(uint8_t scale) {
 		pCur = pCur->next();
 	}
 	countFPS();
+	onEndFrame();
+#if !FASTLED_MANUAL_ENGINE_EVENTS
 	fl::EngineEvents::onEndShowLeds();
+#endif
+}
+
+void CFastLED::onEndFrame() {
 	fl::EngineEvents::onEndFrame();
 }
 
@@ -213,6 +246,7 @@ void CFastLED::showColor(const struct CRGB & color, uint8_t scale) {
 		pCur = pCur->next();
 	}
 	countFPS();
+	onEndFrame();
 }
 
 void CFastLED::clear(bool writeData) {
@@ -321,10 +355,10 @@ extern int noise_max;
 
 void CFastLED::countFPS(int nFrames) {
 	static int br = 0;
-	static uint32_t lastframe = 0; // millis();
+	static fl::u32 lastframe = 0; // millis();
 
 	if(br++ >= nFrames) {
-		uint32_t now = millis();
+		fl::u32 now = millis();
 		now -= lastframe;
 		if(now == 0) {
 			now = 1; // prevent division by zero below
@@ -335,7 +369,7 @@ void CFastLED::countFPS(int nFrames) {
 	}
 }
 
-void CFastLED::setMaxRefreshRate(uint16_t refresh, bool constrain) {
+void CFastLED::setMaxRefreshRate(fl::u16 refresh, bool constrain) {
 	if(constrain) {
 		// if we're constraining, the new value of m_nMinMicros _must_ be higher than previously (because we're only
 		// allowed to slow things down if constraining)
@@ -368,9 +402,9 @@ namespace __cxxabiv1
 	/* The ABI requires a 64-bit type.  */
 	__extension__ typedef int __guard __attribute__((mode(__DI__)));
 
-	extern "C" int __cxa_guard_acquire (__guard *) __attribute__((weak));
-	extern "C" void __cxa_guard_release (__guard *) __attribute__((weak));
-	extern "C" void __cxa_guard_abort (__guard *) __attribute__((weak));
+	extern "C" int __cxa_guard_acquire (__guard *) FL_LINK_WEAK;
+	extern "C" void __cxa_guard_release (__guard *) FL_LINK_WEAK;
+	extern "C" void __cxa_guard_abort (__guard *) FL_LINK_WEAK;
 
 	extern "C" int __cxa_guard_acquire (__guard *g)
 	{

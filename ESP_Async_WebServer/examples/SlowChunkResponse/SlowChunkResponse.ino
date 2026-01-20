@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright 2016-2025 Hristo Gochkov, Mathieu Carbou, Emil Muratov
+// Copyright 2016-2026 Hristo Gochkov, Mathieu Carbou, Emil Muratov, Will Miles
 
 //
 // Simulate a slow response in a chunk response (like file download from SD Card)
@@ -7,14 +7,14 @@
 //
 
 #include <Arduino.h>
-#ifdef ESP32
+#if defined(ESP32) || defined(LIBRETINY)
 #include <AsyncTCP.h>
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
-#elif defined(TARGET_RP2040)
-#include <WebServer.h>
+#elif defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
+#include <RPAsyncTCP.h>
 #include <WiFi.h>
 #endif
 
@@ -89,7 +89,7 @@ static size_t charactersIndex = 0;
 void setup() {
   Serial.begin(115200);
 
-#ifndef CONFIG_IDF_TARGET_ESP32H2
+#if ASYNCWEBSERVER_WIFI_SUPPORTED
   WiFi.mode(WIFI_AP);
   WiFi.softAP("esp-captive");
 #endif
@@ -113,6 +113,11 @@ void setup() {
   // - l=10000 is the length of the response
   //
   // time curl -N -v -G -d 'd=2000' -d 'l=10000'  http://192.168.4.1/slow.html --output -
+  //
+  // THIS CODE WILL CRASH BECAUSE OF THE WATCHDOG.
+  // IF YOU REALLY NEED TO DO THIS, YOU MUST DISABLE THE TWDT
+  //
+  // CORRECT WAY IS TO USE SSE OR WEBSOCKETS TO DO THE COSTLY PROCESSING ASYNC.
   //
   server.on("/slow.html", HTTP_GET, [](AsyncWebServerRequest *request) {
     uint32_t d = request->getParam("d")->value().toInt();

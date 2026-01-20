@@ -1,4 +1,4 @@
-#include <SoftwareSerial.h>   // by Uz
+#include <SoftwareSerial.h>
 
 /*!
  * EasyNextionLibrary.h - Easy library for Nextion Displays
@@ -41,7 +41,7 @@ class EasyNex {
    * initialization data: unsigned long baud = 9600 (default) if nothing written in the begin()
    * myObject.begin(115200); for baud rate 115200
    * 
-   * -- EasyNex(HardwareSerial& serial): The constructor of the class that has the parameter of the Serial we use
+   * -- EasyNex(SoftwareSerial& serial): The constructor of the class that has the parameter of the Serial we use
    * EasyNex.myObject(Serial);  or Serial1, Serial2....
    *
    * -- writeNum(String, unsigned int): for writing in components' numeric attribute

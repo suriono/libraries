@@ -1,23 +1,59 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright 2016-2025 Hristo Gochkov, Mathieu Carbou, Emil Muratov
+// Copyright 2016-2026 Hristo Gochkov, Mathieu Carbou, Emil Muratov, Will Miles
 
 //
 // WebSocket example
 //
 
 #include <Arduino.h>
-#ifdef ESP32
+#if defined(ESP32) || defined(LIBRETINY)
 #include <AsyncTCP.h>
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
-#elif defined(TARGET_RP2040)
-#include <WebServer.h>
+#elif defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
+#include <RPAsyncTCP.h>
 #include <WiFi.h>
 #endif
 
 #include <ESPAsyncWebServer.h>
+
+static const char *htmlContent PROGMEM = R"(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebSocket</title>
+</head>
+<body>
+  <h1>WebSocket Example</h1>
+  <p>Open your browser console!</p>
+  <input type="text" id="message" placeholder="Type a message">
+  <button onclick='sendMessage()'>Send</button>
+  <script>
+    var ws = new WebSocket('ws://192.168.4.1/ws');
+    ws.onopen = function() {
+      console.log("WebSocket connected");
+    };
+    ws.onmessage = function(event) {
+      console.log("WebSocket message: " + event.data);
+    };
+    ws.onclose = function() {
+      console.log("WebSocket closed");
+    };
+    ws.onerror = function(error) {
+      console.log("WebSocket error: " + error);
+    };
+    function sendMessage() {
+      var message = document.getElementById("message").value;
+      ws.send(message);
+      console.log("WebSocket sent: " + message);
+    }
+  </script>
+</body>
+</html>
+  )";
+static const size_t htmlContentLength = strlen_P(htmlContent);
 
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
@@ -25,10 +61,15 @@ static AsyncWebSocket ws("/ws");
 void setup() {
   Serial.begin(115200);
 
-#ifndef CONFIG_IDF_TARGET_ESP32H2
+#if ASYNCWEBSERVER_WIFI_SUPPORTED
   WiFi.mode(WIFI_AP);
   WiFi.softAP("esp-captive");
 #endif
+
+  // serves root html page
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", (const uint8_t *)htmlContent, htmlContentLength);
+  });
 
   //
   // Run in terminal 1: websocat ws://192.168.4.1/ws => should stream data
@@ -60,11 +101,13 @@ void setup() {
 
     } else if (type == WS_EVT_DATA) {
       AwsFrameInfo *info = (AwsFrameInfo *)arg;
+      Serial.printf("index: %" PRIu64 ", len: %" PRIu64 ", final: %" PRIu8 ", opcode: %" PRIu8 "\n", info->index, info->len, info->final, info->opcode);
       String msg = "";
       if (info->final && info->index == 0 && info->len == len) {
         if (info->opcode == WS_TEXT) {
           data[len] = 0;
           Serial.printf("ws text: %s\n", (char *)data);
+          client->ping();
         }
       }
     }
@@ -101,8 +144,10 @@ void loop() {
   }
 
   if (now - lastHeap >= 2000) {
-    // cleanup disconnected clients or too many clients
-    ws.cleanupClients();
+    Serial.printf("Connected clients: %u / %u total\n", ws.count(), ws.getClients().size());
+
+    // this can be called to also set a soft limit on the number of connected clients
+    ws.cleanupClients(2);  // no more than 2 clients
 
 #ifdef ESP32
     Serial.printf("Free heap: %" PRIu32 "\n", ESP.getFreeHeap());

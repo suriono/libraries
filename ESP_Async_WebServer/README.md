@@ -15,7 +15,7 @@
 
 [![Documentation](https://img.shields.io/badge/Wiki-ESPAsyncWebServer-blue?logo=github)](https://github.com/ESP32Async/ESPAsyncWebServer/wiki)
 
-## Asynchronous HTTP and WebSocket Server Library for ESP32, ESP8266 and RP2040
+## Asynchronous HTTP and WebSocket Server Library for ESP32, ESP8266, RP2040 and RP2350
 
 Supports: WebSocket, SSE, Authentication, Arduino Json 7, File Upload, Static File serving, URL Rewrite, URL Redirect, etc.
 
@@ -38,7 +38,7 @@ It is also deployed in these registries:
 
 - Arduino Library Registry: [https://github.com/arduino/library-registry](https://github.com/arduino/library-registry)
 
-- ESP Component Registry [https://components.espressif.com/components/esp32async/espasyncbebserver/](https://components.espressif.com/components/esp32async/espasyncbebserver/)
+- ESP Component Registry [https://components.espressif.com/components/esp32async/espasyncwebserver](https://components.espressif.com/components/esp32async/espasyncwebserver)
 
 - PlatformIO Registry: [https://registry.platformio.org/libraries/esp32async/ESPAsyncWebServer](https://registry.platformio.org/libraries/esp32async/ESPAsyncWebServer)
 
@@ -72,6 +72,19 @@ lib_deps =
   ESP32Async/ESPAsyncWebServer
 ```
 
+### LibreTiny (BK7231N/T, RTL8710B, etc.)
+
+Version 1.9.1 or newer is required.
+
+```ini
+[env:stable]
+platform = libretiny @ ^1.9.1
+lib_ldf_mode = chain
+lib_deps =
+  ESP32Async/AsyncTCP
+  ESP32Async/ESPAsyncWebServer
+```
+
 ### Unofficial dependencies
 
 **AsyncTCPSock**
@@ -89,9 +102,9 @@ lib_ignore =
   ESP32Async/AsyncTCP
 ```
 
-**AsyncTCP_RP2040W**
+**RPAsyncTCP**
 
-AsyncTCP_RP2040W provides support for RP2040 and replaced AsyncTCP in this case:
+RPAsyncTCP replaces AsyncTCP to provide support for RP2040(+WiFi) and RP2350(+WiFi) boards. For example - Raspberry Pi Pico W and Raspberry Pi Pico 2W.
 
 ```ini
 lib_compat_mode = strict
@@ -100,7 +113,7 @@ platform = https://github.com/maxgerhardt/platform-raspberrypi.git
 board = rpipicow
 board_build.core = earlephilhower
 lib_deps =
-  khoih-prog/AsyncTCP_RP2040W @ 1.2.0
+  ayushsharma82/RPAsyncTCP@^1.3.2
   ESP32Async/ESPAsyncWebServer
 lib_ignore =
   lwIP_ESPHost

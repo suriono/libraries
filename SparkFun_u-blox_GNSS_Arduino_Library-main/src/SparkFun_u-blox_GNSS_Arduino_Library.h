@@ -231,6 +231,7 @@ const uint8_t UBX_CFG_RINV = 0x34;      // Contents of Remote Inventory
 const uint8_t UBX_CFG_RST = 0x04;       // Reset Receiver / Clear Backup Data Structures. Used to reset device.
 const uint8_t UBX_CFG_RXM = 0x11;       // RXM configuration
 const uint8_t UBX_CFG_SBAS = 0x16;      // SBAS configuration
+const uint8_t UBX_CFG_SMGR = 0x62;      // Synchronization manager configuration
 const uint8_t UBX_CFG_TMODE3 = 0x71;    // Time Mode Settings 3. Used to enable Survey In Mode
 const uint8_t UBX_CFG_TP5 = 0x31;       // Time Pulse Parameters
 const uint8_t UBX_CFG_USB = 0x1B;       // USB Configuration
@@ -411,10 +412,17 @@ const uint8_t UBX_RXM_SPARTNKEY = 0x36; // Poll/transfer dynamic SPARTN keys
 const uint8_t UBX_SEC_UNIQID = 0x03; // Unique chip ID
 
 // Class: TIM
-// The following are used to configure the TIM UBX messages (timing messages). Descriptions from UBX messages overview (ZED_F9P Interface Description Document page 36)
-const uint8_t UBX_TIM_TM2 = 0x03;  // Time mark data
-const uint8_t UBX_TIM_TP = 0x01;   // Time Pulse Timedata
-const uint8_t UBX_TIM_VRFY = 0x06; // Sourced Time Verification
+// The following are used to configure the TIM UBX messages (timing messages). Descriptions from UBX messages overview (u-blox M8 Protocol Specification Document page 178)
+const uint8_t UBX_TIM_DOSC = 0x11;    // Disciplined oscillator control
+const uint8_t UBX_TIM_FCHG = 0x16;    // Oscillator freq changed notification
+const uint8_t UBX_TIM_HOC = 0x17;     // Host oscillator control
+const uint8_t UBX_TIM_SMEAS = 0x13;   // Source measurement
+const uint8_t UBX_TIM_SVIN = 0x04;    // Survey-in data
+const uint8_t UBX_TIM_TM2 = 0x03;     // Time mark data
+const uint8_t UBX_TIM_TOS = 0x12;     // Time Pulse time and freq data
+const uint8_t UBX_TIM_TP = 0x01;      // Time Pulse time data
+const uint8_t UBX_TIM_VCOCAL = 0x15;  // Calibration
+const uint8_t UBX_TIM_VRFY = 0x06;    // Sourced Time Verification
 
 // Class: UPD
 // The following are used to configure the UPD UBX messages (firmware update messages). Descriptions from UBX messages overview (ZED-F9P Interface Description Document page 36)
@@ -581,11 +589,30 @@ enum sfe_ublox_dgnss_mode_e
   SFE_UBLOX_DGNSS_MODE_FIXED      // Ambiguities are fixed whenever possible
 };
 
+// Values for UBX-CFG-PMS
+enum sfe_ublox_pms_mode_e
+{
+  SFE_UBLOX_PMS_MODE_FULLPOWER = 0,
+  SFE_UBLOX_PMS_MODE_BALANCED,
+  SFE_UBLOX_PMS_MODE_INTERVAL,
+  SFE_UBLOX_PMS_MODE_AGGRESSIVE_1HZ,
+  SFE_UBLOX_PMS_MODE_AGGRESSIVE_2HZ,
+  SFE_UBLOX_PMS_MODE_AGGRESSIVE_4HZ,
+  SFE_UBLOX_PMS_MODE_INVALID = 0xff
+};
+
+//Values for UBX-CFG-RXM
+enum sfe_ublox_rxm_mode_e
+{
+  SFE_UBLOX_CFG_RXM_CONTINUOUS = 0,
+  SFE_UBLOX_CFG_RXM_POWERSAVE = 1
+};
+
 //-=-=-=-=-
 
 #ifndef MAX_PAYLOAD_SIZE
 // v2.0: keep this for backwards-compatibility, but this is largely superseded by setPacketCfgPayloadSize
-#define MAX_PAYLOAD_SIZE 256 // We need ~220 bytes for getProtocolVersion on most ublox modules
+#define MAX_PAYLOAD_SIZE 276 // We need >=250 bytes for getProtocolVersion on the NEO-F10N
 //#define MAX_PAYLOAD_SIZE 768 //Worst case: UBX_CFG_VALSET packet with 64 keyIDs each with 64 bit values
 #endif
 
@@ -660,7 +687,7 @@ class SFE_UBLOX_GNSS
 {
 public:
   SFE_UBLOX_GNSS(void);
-  ~SFE_UBLOX_GNSS(void);
+  virtual ~SFE_UBLOX_GNSS(void);
 
   // Depending on the sentence type the processor will load characters into different arrays
   enum sfe_ublox_sentence_types_e
@@ -764,8 +791,11 @@ public:
 
   void process(uint8_t incoming, ubxPacket *incomingUBX, uint8_t requestedClass, uint8_t requestedID);             // Processes NMEA and UBX binary sentences one byte at a time
   void processNMEA(char incoming) __attribute__((weak));                                                           // Given a NMEA character, do something with it. User can overwrite if desired to use something like tinyGPS or MicroNMEA libraries
+  virtual void processNMEA_v(char incoming);                                                                       // Given a NMEA character, do something with it. User can overwrite if desired to use something like tinyGPS or MicroNMEA libraries
   sfe_ublox_sentence_types_e processRTCMframe(uint8_t incoming, uint16_t *rtcmFrameCounter) __attribute__((weak)); // Monitor the incoming bytes for start and length bytes
+  virtual sfe_ublox_sentence_types_e processRTCMframe_v(uint8_t incoming, uint16_t *rtcmFrameCounter);             // Monitor the incoming bytes for start and length bytes
   void processRTCM(uint8_t incoming) __attribute__((weak));                                                        // Given rtcm byte, do something with it. User can overwrite if desired to pipe bytes to radio, internet, etc.
+  virtual void processRTCM_v(uint8_t incoming);                                                                    // Given rtcm byte, do something with it. User can overwrite if desired to pipe bytes to radio, internet, etc.
   void processUBX(uint8_t incoming, ubxPacket *incomingUBX, uint8_t requestedClass, uint8_t requestedID);          // Given a character, file it away into the uxb packet structure
   void processUBXpacket(ubxPacket *msg);                                                                           // Once a packet has been received and validated, identify this packet's class/id and update internal flags
 
@@ -920,10 +950,17 @@ public:
   uint8_t getPowerSaveMode(uint16_t maxWait = defaultMaxWait); // Returns 255 if the sendCommand fails
   bool powerOff(uint32_t durationInMs, uint16_t maxWait = defaultMaxWait);
   bool powerOffWithInterrupt(uint32_t durationInMs, uint32_t wakeupSources = VAL_RXM_PMREQ_WAKEUPSOURCE_EXTINT0, bool forceWhileUsb = true, uint16_t maxWait = defaultMaxWait);
+  // Power Mode Setup. Values period and onTime are only valid if mode is SFE_UBLOX_PMS_MODE_INTERVAL
+  bool setPowerManagement(sfe_ublox_pms_mode_e mode, uint16_t period=0, uint16_t onTime=0, uint16_t maxWait = defaultMaxWait);
+  bool setupPowerMode(sfe_ublox_rxm_mode_e mode, uint16_t maxWait = defaultMaxWait);
 
   // Change the dynamic platform model using UBX-CFG-NAV5
   bool setDynamicModel(dynModel newDynamicModel = DYN_MODEL_PORTABLE, uint16_t maxWait = defaultMaxWait);
   uint8_t getDynamicModel(uint16_t maxWait = defaultMaxWait); // Get the dynamic model - returns 255 if the sendCommand fails
+
+  // Change the position accuracy using UBX-CFG-NAV5
+  bool setNAV5PositionAccuracy(uint16_t metres, uint16_t maxWait = defaultMaxWait);
+  uint16_t getNAV5PositionAccuracy(uint16_t maxWait = defaultMaxWait); // Get the position accuracy - returns 0 if the sendCommand fails
 
   // Reset / enable / configure the odometer
   bool resetOdometer(uint16_t maxWait = defaultMaxWait); // Reset the odometer
@@ -1262,6 +1299,11 @@ public:
   void flushTIMTM2();                                                                                                 // Mark all the data as read/stale
   void logTIMTM2(bool enabled = true);                                                                                // Log data to file buffer
 
+  bool setAutoTIMSMEA(bool enabled, bool implicitUpdate, uint16_t maxWait = defaultMaxWait);                           // Enable/disable automatic TIM SMEA reports at the navigation frequency, with implicitUpdate == false accessing stale data will not issue parsing of data in the rxbuffer of your interface, instead you have to call checkUblox when you want to perform an update
+  bool setAutoTIMSMEAcallback(void (*callbackPointer)(UBX_TIM_SMEAS_data_t), uint16_t maxWait = defaultMaxWait);       // Enable automatic SMEA reports at the navigation frequency. Data is accessed from the callback.
+  void flushTIMSMEA();                                                                                                 // Mark all the data as read/stale
+  void logTIMSMEA(bool enabled = true);                                                                                // Log data to file buffer
+
   // Sensor fusion (dead reckoning) (ESF)
 
   bool getEsfAlignment(uint16_t maxWait = defaultMaxWait);                                                            // ESF ALG Helper
@@ -1396,6 +1438,7 @@ public:
   uint8_t getFixType(uint16_t maxWait = defaultMaxWait); // Returns the type of fix: 0=no, 3=3D, 4=GNSS+Deadreckoning
 
   bool getGnssFixOk(uint16_t maxWait = defaultMaxWait); // Get whether we have a valid fix (i.e within DOP & accuracy masks)
+  bool getNAVPVTPSMMode(uint16_t maxWait = defaultMaxWait); // Not fully documented power save mode value
   bool getDiffSoln(uint16_t maxWait = defaultMaxWait);  // Get whether differential corrections were applied
   bool getHeadVehValid(uint16_t maxWait = defaultMaxWait);
   uint8_t getCarrierSolutionType(uint16_t maxWait = defaultMaxWait); // Returns RTK solution: 0=no, 1=float solution, 2=fixed solution
@@ -1544,13 +1587,13 @@ public:
 
   // Functions to extract signed and unsigned 8/16/32-bit data from a ubxPacket
   // From v2.0: These are public. The user can call these to extract data from custom packets
-  uint64_t extractLongLong(ubxPacket *msg, uint16_t spotToStart);  // Combine eight bytes from payload into uint64_t
-  uint32_t extractLong(ubxPacket *msg, uint16_t spotToStart);      // Combine four bytes from payload into long
-  int32_t extractSignedLong(ubxPacket *msg, uint16_t spotToStart); // Combine four bytes from payload into signed long (avoiding any ambiguity caused by casting)
-  uint16_t extractInt(ubxPacket *msg, uint16_t spotToStart);       // Combine two bytes from payload into int
-  int16_t extractSignedInt(ubxPacket *msg, uint16_t spotToStart);
-  uint8_t extractByte(ubxPacket *msg, uint16_t spotToStart);      // Get byte from payload
-  int8_t extractSignedChar(ubxPacket *msg, uint16_t spotToStart); // Get signed 8-bit value from payload
+  static uint64_t extractLongLong(const ubxPacket *msg, uint16_t spotToStart);  // Combine eight bytes from payload into uint64_t
+  static uint32_t extractLong(const ubxPacket *msg, uint16_t spotToStart);      // Combine four bytes from payload into long
+  static int32_t extractSignedLong(const ubxPacket *msg, uint16_t spotToStart); // Combine four bytes from payload into signed long (avoiding any ambiguity caused by casting)
+  static uint16_t extractInt(const ubxPacket *msg, uint16_t spotToStart);       // Combine two bytes from payload into int
+  static int16_t extractSignedInt(const ubxPacket *msg, uint16_t spotToStart);
+  static uint8_t extractByte(const ubxPacket *msg, uint16_t spotToStart);      // Get byte from payload
+  static int8_t extractSignedChar(const ubxPacket *msg, uint16_t spotToStart); // Get signed 8-bit value from payload
 
   // Pointers to storage for the "automatic" messages
   // RAM is allocated for these if/when required.
@@ -1585,7 +1628,8 @@ public:
   UBX_CFG_PRT_t *packetUBXCFGPRT = NULL;   // Pointer to struct. RAM will be allocated for this if/when necessary
   UBX_CFG_RATE_t *packetUBXCFGRATE = NULL; // Pointer to struct. RAM will be allocated for this if/when necessary
 
-  UBX_TIM_TM2_t *packetUBXTIMTM2 = NULL; // Pointer to struct. RAM will be allocated for this if/when necessary
+  UBX_TIM_SMEAS_t *packetUBXTIMSMEAS = NULL;  // Pointer to struct. RAM will be allocated for this if/when necessary
+  UBX_TIM_TM2_t *packetUBXTIMTM2 = NULL;      // Pointer to struct. RAM will be allocated for this if/when necessary
 
   UBX_ESF_ALG_t *packetUBXESFALG = NULL;       // Pointer to struct. RAM will be allocated for this if/when necessary
   UBX_ESF_INS_t *packetUBXESFINS = NULL;       // Pointer to struct. RAM will be allocated for this if/when necessary
@@ -1677,6 +1721,7 @@ private:
   bool initPacketUBXCFGPRT();           // Allocate RAM for packetUBXCFGPRT and initialize it
   bool initPacketUBXCFGRATE();          // Allocate RAM for packetUBXCFGRATE and initialize it
   bool initPacketUBXTIMTM2();           // Allocate RAM for packetUBXTIMTM2 and initialize it
+  bool initPacketUBXTIMSMEA();          // Allocate RAM for packetUBXTIMSMEA and initialize it
   bool initPacketUBXESFALG();           // Allocate RAM for packetUBXESFALG and initialize it
   bool initPacketUBXESFSTATUS();        // Allocate RAM for packetUBXESFSTATUS and initialize it
   bool initPacketUBXESFINS();           // Allocate RAM for packetUBXESFINS and initialize it
